@@ -22,15 +22,21 @@ from pathlib import Path
 # Add common directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from common import settings, get_logger
+from common import settings
+from common.logging import get_logger
 import logfire
 from pydantic_ai import Agent
 
 # Set OpenAI API key from settings
 os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
+
 # Get logger from centralized configuration
 log = get_logger(__name__)
+
+
+# Context variable for request ID
+request_id_var = ContextVar("request_id", default=None)
 
 # Configure Logfire
 logfire.configure()  # Uses .logfire/ directory for configuration
@@ -40,7 +46,7 @@ logfire.instrument_httpx(capture_all=True)  # Capture HTTP requests/responses
 # Create agent with Logfire tracking
 agent = Agent(
     "openai:gpt-4o-mini",
-    system_prompt="You are a helpful AI assistant with expertise in various topics.",
+    system_prompt="You are a helpful AI assistant with expertise in various topics. Your answers must be clear and concise and short.",
 )
 
 
@@ -57,6 +63,7 @@ async def example_basic_tracing():
         "agent_completed",
         output_length=len(result.output),
         message_count=len(result.all_messages()),
+        result_output=result.output[:50],  # Log first 50 chars
     )
     
     print(f"Answer: {result.output}\n")
@@ -73,16 +80,15 @@ async def example_streaming_with_tracing():
     print(f"Prompt: {prompt}\n")
     print("Response: ", end="", flush=True)
     
+    from pydantic_ai.messages import PartDeltaEvent
     complete_text = ""
-    async with agent.run_stream(prompt) as stream:
-        chunk_count = 0
-        async for chunk in stream.stream_text():
-            print(chunk, end="", flush=True)
+    chunk_count = 0
+    async for event in agent.run_stream_events(prompt):
+        if isinstance(event, PartDeltaEvent):
+            print(event.delta.content_delta, end="", flush=True)
             chunk_count += 1
-            complete_text = chunk  # Save the complete text
-    
+            complete_text += event.delta.content_delta
     print("\n")
-    
     log.info(
         "streaming_completed",
         chunks_received=chunk_count,
@@ -98,7 +104,7 @@ async def example_with_context():
     # Simulate a request with ID
     request_id = "req_12345"
     token = request_id_var.set(request_id)
-    structlog.contextvars.bind_contextvars(request_id=request_id)
+    log.bind_contextvars(request_id=request_id)
     
     try:
         log.info("user_request_received", query="astronomy question")
@@ -116,7 +122,7 @@ async def example_with_context():
         
     finally:
         request_id_var.reset(token)
-        structlog.contextvars.clear_contextvars()
+        log.clear_contextvars()
 
 
 async def example_error_tracing():
@@ -176,11 +182,11 @@ async def main():
     print("=" * 80 + "\n")
     print("View all traces at: https://logfire.pydantic.dev\n")
     
-    await example_basic_tracing()
-    await example_streaming_with_tracing()
+    # await example_basic_tracing()
+    # await example_streaming_with_tracing()
     await example_with_context()
-    await example_error_tracing()
-    await example_parallel_with_tracing()
+    # await example_error_tracing()
+    # await example_parallel_with_tracing()
     
     print("\n" + "=" * 80)
     print("All examples completed! Check your Logfire dashboard.")

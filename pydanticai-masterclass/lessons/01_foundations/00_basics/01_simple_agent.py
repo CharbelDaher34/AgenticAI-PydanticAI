@@ -29,7 +29,7 @@ logfire.instrument_pydantic_ai()
 # Create a simple agent with instructions
 simple_agent = Agent(
     "openai:gpt-4o-mini",
-    system_prompt="You are a helpful assistant that provides concise, accurate answers.",
+    system_prompt="You are a helpful assistant that provides concise, accurate answers. Your answers must be small.",
 )
 
 

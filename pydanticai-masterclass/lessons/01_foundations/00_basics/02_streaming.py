@@ -4,7 +4,6 @@ This example demonstrates:
 - Streaming text responses with run_stream()
 - Handling stream events asynchronously
 - Difference between streaming and non-streaming execution
-- Multiple parallel streams
 """
 
 import asyncio
@@ -18,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 from common import settings
 import logfire
 from pydantic_ai import Agent
+from pydantic_ai.messages import PartDeltaEvent, AgentStreamEvent
 
 # Set OpenAI API key from settings
 os.environ["OPENAI_API_KEY"] = settings.openai_api_key
@@ -31,6 +31,7 @@ streaming_agent = Agent(
     system_prompt=(
         "You are a creative storyteller. "
         "Tell engaging short stories with vivid descriptions."
+        " Your answers must be concise and short."
     ),
 )
 
@@ -43,10 +44,10 @@ async def example_async_streaming():
     print(f"Prompt: {prompt}\n")
     print("Response: ", end="", flush=True)
     
-    async with streaming_agent.run_stream(prompt) as stream:
-        # Stream text chunks as they arrive
-        async for chunk in stream.stream_text():
-            print(chunk, end="", flush=True)
+    # Use run_stream_events() to iterate over stream events including deltas
+    async for event in streaming_agent.run_stream_events(prompt):
+        if isinstance(event, PartDeltaEvent):
+            print(event.delta.content_delta, end="", flush=True)
     
     print("\n\n")
     
@@ -55,10 +56,9 @@ async def example_async_streaming():
     print(f"Prompt: {prompt}\n")
     print("Response:\n", end="", flush=True)
     
-    async with streaming_agent.run_stream(prompt) as stream:
-        # Stream text chunks as they arrive
-        async for chunk in stream.stream_text():
-            print(chunk, end="", flush=True)
+    async for event in streaming_agent.run_stream_events(prompt):
+        if isinstance(event, PartDeltaEvent):
+            print(event.delta.content_delta, end="", flush=True)
     
     print("\n")
 
@@ -71,44 +71,19 @@ async def example_streaming_with_result():
     print(f"Prompt: {prompt}\n")
     print("Streaming: ", end="", flush=True)
     
-    # Store the last chunk which contains the complete text
-    complete_text = ""
-    async with streaming_agent.run_stream(prompt) as stream:
-        # Stream the text
-        async for chunk in stream.stream_text():
-            print(chunk, end="", flush=True)
-            complete_text = chunk  # Each chunk is the complete text so far
+    result = None
+    async for event in streaming_agent.run_stream_events(prompt):
+        if isinstance(event, PartDeltaEvent):
+            print(event.delta.content_delta, end="", flush=True)
+        elif hasattr(event, 'result'):
+            # This is the final AgentRunResultEvent
+            result = event.result
     
     print("\n")
-    print(f"\nComplete response: {complete_text}")
-    print(f"Total messages: {len(stream.all_messages())}")
-    print(f"Usage: {stream.usage()}")
-
-
-async def example_multiple_streams():
-    """Stream multiple responses concurrently."""
-    print("=== Multiple Concurrent Streams ===\n")
-    
-    prompts = [
-        "Name 3 planets.",
-        "Name 3 colors.",
-        "Name 3 animals.",
-    ]
-    
-    async def stream_response(prompt: str) -> str:
-        """Helper to stream a single response."""
-        output = []
-        async with streaming_agent.run_stream(prompt) as stream:
-            async for chunk in stream.stream_text():
-                output.append(chunk)
-        return "".join(output)
-    
-    # Run all streams concurrently
-    results = await asyncio.gather(*[stream_response(p) for p in prompts])
-    
-    for prompt, result in zip(prompts, results):
-        print(f"Q: {prompt}")
-        print(f"A: {result}\n")
+    if result:
+        print(f"\nComplete response: {result.output}")
+        print(f"Total messages: {len(result.all_messages())}")
+        print(f"Usage: {result.usage()}")
 
 
 async def main():
@@ -119,7 +94,6 @@ async def main():
     
     await example_async_streaming()
     await example_streaming_with_result()
-    await example_multiple_streams()
     
     print("=" * 80)
     print("Check Logfire dashboard to see streaming traces!")
