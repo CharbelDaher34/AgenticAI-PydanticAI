@@ -11,6 +11,9 @@ This lesson covers dependency injection patterns in PydanticAI, one of the most 
 3. **Multiple Dependencies** - Working with complex dependency types
 4. **Dynamic System Prompts** - Using dependencies in system prompts
 5. **Testing with Mocks** - How DI makes testing easier
+6. **Output Validators** - Using dependencies to validate agent output
+7. **Sync vs Async** - Choosing between synchronous and asynchronous dependencies
+8. **Overriding Dependencies** - Testing with agent.override()
 
 ## Key Concepts
 
@@ -49,11 +52,14 @@ Dependencies can be:
 
 ## Examples
 
-1. **01_basic_deps.py** - Simple dependency injection
-2. **02_database_deps.py** - Using the mock database
+1. **01_basic_deps.py** - Simple dependency injection with basic types
+2. **02_database_deps.py** - Using the mock database as a dependency
 3. **03_complex_deps.py** - Multiple dependencies with dataclasses
-4. **04_dynamic_prompts.py** - System prompts using dependencies
+4. **04_dynamic_prompts.py** - Dynamic system prompts using dependencies
 5. **05_testing_mocks.py** - Testing agents with mock dependencies
+6. **06_output_validators.py** - Using dependencies in output validators
+7. **07_sync_vs_async_deps.py** - Synchronous vs asynchronous dependencies
+8. **08_overriding_deps.py** - Testing with agent.override()
 
 ## Running the Examples
 
