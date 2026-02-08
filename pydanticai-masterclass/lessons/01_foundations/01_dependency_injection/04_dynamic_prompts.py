@@ -58,6 +58,8 @@ async def get_system_prompt(ctx: RunContext[UserContext]) -> str:
     This function is called BEFORE each agent run, allowing you to
     customize the agent's behavior based on current dependencies.
     """
+    log.info("generating_system_prompt", user_id=ctx.deps.user_id, tier=ctx.deps.subscription_tier)
+    
     # Get user info from database
     user = await ctx.deps.database.get_user(ctx.deps.user_id)
     
@@ -105,6 +107,7 @@ Instructions:
 async def get_my_subscription(ctx: RunContext[UserContext]) -> str:
     """Get current subscription tier information."""
     tier = ctx.deps.subscription_tier
+    log.info("getting_subscription_info", user_id=ctx.deps.user_id, tier=tier)
     
     features = {
         "free": [
@@ -145,8 +148,10 @@ async def upgrade_subscription(ctx: RunContext[UserContext], target_tier: str) -
         target_tier: Target subscription tier ("pro" or "enterprise")
     """
     current_tier = ctx.deps.subscription_tier
+    log.info("checking_upgrade", user_id=ctx.deps.user_id, current_tier=current_tier, target_tier=target_tier)
     
     if target_tier.lower() not in ["pro", "enterprise"]:
+        log.warning("invalid_tier_requested", target_tier=target_tier)
         return "Invalid tier. Choose 'pro' or 'enterprise'."
     
     if current_tier == target_tier.lower():

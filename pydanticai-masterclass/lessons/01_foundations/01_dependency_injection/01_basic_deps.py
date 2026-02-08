@@ -40,6 +40,7 @@ simple_agent = Agent[str, str](
 @simple_agent.tool
 async def get_user_name(ctx: RunContext[str]) -> str:
     """Get the current user's name from dependencies."""
+    log.info("getting_user_name", user=ctx.deps)
     return f"The user's name is {ctx.deps}"
 
 
@@ -53,6 +54,7 @@ user_id_agent = Agent[int, str](
 @user_id_agent.tool
 async def get_user_id(ctx: RunContext[int]) -> str:
     """Get the current user's ID."""
+    log.info("getting_user_id", user_id=ctx.deps)
     return f"User ID: {ctx.deps}"
 
 
@@ -60,6 +62,7 @@ async def get_user_id(ctx: RunContext[int]) -> str:
 async def check_premium_status(ctx: RunContext[int]) -> bool:
     """Check if user has premium status (IDs > 1000 are premium)."""
     is_premium = ctx.deps > 1000
+    log.info("checking_premium_status", user_id=ctx.deps, is_premium=is_premium)
     return is_premium
 
 
@@ -73,6 +76,7 @@ time_agent = Agent[datetime, str](
 @time_agent.tool
 async def get_current_time(ctx: RunContext[datetime]) -> str:
     """Get the current time from dependencies."""
+    log.info("getting_current_time", time=ctx.deps.isoformat())
     return ctx.deps.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -80,11 +84,14 @@ async def get_current_time(ctx: RunContext[datetime]) -> str:
 async def is_business_hours(ctx: RunContext[datetime]) -> bool:
     """Check if current time is during business hours (9 AM - 5 PM)."""
     hour = ctx.deps.hour
-    return 9 <= hour < 17
+    is_business = 9 <= hour < 17
+    log.info("checking_business_hours", hour=hour, is_business_hours=is_business)
+    return is_business
 
 
 async def example_simple_dependency():
     """Example with simple string dependency."""
+    log.info("running_example", example="simple_dependency")
     print("=== Example 1: Simple String Dependency ===\n")
     
     user_name = "Alice Johnson"

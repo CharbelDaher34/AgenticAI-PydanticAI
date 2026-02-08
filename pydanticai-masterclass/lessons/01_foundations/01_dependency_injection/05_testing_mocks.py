@@ -90,28 +90,35 @@ test_agent = Agent[TestDatabase, str](
 @test_agent.tool
 async def find_product(ctx: RunContext[TestDatabase], product_name: str) -> str:
     """Find a product by name."""
+    log.info("finding_product", product_name=product_name)
     products = await ctx.deps.search_products(product_name)
     
     if not products:
+        log.info("product_not_found", product_name=product_name)
         return f"No products found matching '{product_name}'"
     
     product = products[0]
+    log.info("product_found", product_name=product.name, price=product.price)
     return f"Found: {product.name} - ${product.price}"
 
 
 @test_agent.tool
 async def get_product_price(ctx: RunContext[TestDatabase], product_id: int) -> str:
     """Get price of a specific product."""
+    log.info("getting_product_price", product_id=product_id)
     product = await ctx.deps.get_product(product_id)
     
     if not product:
+        log.warning("product_price_not_found", product_id=product_id)
         return f"Product {product_id} not found"
     
+    log.info("product_price_retrieved", product_id=product_id, price=product.price)
     return f"${product.price}"
 
 
 async def test_product_search():
     """Test: Agent can search for products."""
+    log.info("running_test", test="product_search")
     print("=== Test 1: Product Search ===\n")
     
     # Arrange: Set up test database
