@@ -10,7 +10,7 @@ This example demonstrates:
 import asyncio
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -72,13 +72,8 @@ class MockEmailDeps(EmailDeps):
     """
     
     # Track emails sent during tests
-    sent_emails: list[dict] = None
+    sent_emails: list[dict] = field(default_factory=list)
     should_fail: bool = False
-    
-    def __post_init__(self):
-        """Initialize tracking list."""
-        if self.sent_emails is None:
-            self.sent_emails = []
     
     async def send_email(self, to: str, subject: str, body: str) -> bool:
         """Mock email sending for tests."""
@@ -264,7 +259,7 @@ async def test_email_failure_handling():
     
     # Email should not be in sent list (it failed)
     assert len(mock_deps.sent_emails) == 0, "Should not record failed emails"
-    assert "failed" in result.lower() or "✗" in result
+    assert "✗" in result, "Should indicate failure with ✗ symbol"
     
     print("✓ Test passed: Failure handled correctly\n")
 

@@ -9,6 +9,7 @@ This example demonstrates:
 
 import asyncio
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -203,7 +204,6 @@ async def validate_order_info(ctx: RunContext[DatabaseValidationDeps], output: s
     
     # Check if output mentions invalid product IDs
     # Simple check: look for "product [ID]" pattern
-    import re
     
     product_mentions = re.findall(r'product\s+(\d+)', output.lower())
     for product_id_str in product_mentions:
