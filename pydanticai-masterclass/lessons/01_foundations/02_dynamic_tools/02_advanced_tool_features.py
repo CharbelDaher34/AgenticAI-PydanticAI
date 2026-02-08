@@ -173,7 +173,7 @@ async def fetch_external_data(
         return f"Error: Invalid endpoint '{endpoint}'"
     
     # Simulate successful API response
-    return f"Data from {endpoint}: {{status: 'ok', data: [...]}}}"
+    return f"Data from {endpoint}: {{'status': 'ok', 'data': [...]}}"
 
 
 # Example 4: Tool with timeout
