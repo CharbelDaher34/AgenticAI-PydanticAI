@@ -63,9 +63,11 @@ customer_service_agent = Agent[AppContext, str](
 @customer_service_agent.tool
 async def get_my_info(ctx: RunContext[AppContext]) -> str:
     """Get information about the current user."""
+    log.info("getting_user_info", user_id=ctx.deps.current_user_id, is_admin=ctx.deps.is_admin)
     user = await ctx.deps.database.get_user(ctx.deps.current_user_id)
     
     if not user:
+        log.warning("user_not_found", user_id=ctx.deps.current_user_id)
         return "User information not found"
     
     admin_status = " (Admin)" if ctx.deps.is_admin else ""
@@ -80,11 +82,13 @@ async def get_my_info(ctx: RunContext[AppContext]) -> str:
 @customer_service_agent.tool
 async def get_my_orders(ctx: RunContext[AppContext]) -> str:
     """Get the current user's order history."""
+    log.info("getting_user_orders", user_id=ctx.deps.current_user_id)
     orders = await ctx.deps.database.list_user_orders(ctx.deps.current_user_id)
     
     if not orders:
         return "You have no orders yet."
     
+    log.info("orders_retrieved", user_id=ctx.deps.current_user_id, order_count=len(orders))
     result = f"You have {len(orders)} order(s):\n"
     for order in orders:
         product = await ctx.deps.database.get_product(order.product_id)
@@ -112,9 +116,12 @@ async def place_order(
         product_id: ID of the product to order
         quantity: Quantity to order
     """
+    log.info("placing_order", user_id=ctx.deps.current_user_id, product_id=product_id, quantity=quantity)
+    
     # Verify user exists
     user = await ctx.deps.database.get_user(ctx.deps.current_user_id)
     if not user:
+        log.error("order_failed_user_not_found", user_id=ctx.deps.current_user_id)
         return "Error: User not found"
     
     # Create the order
@@ -123,11 +130,13 @@ async def place_order(
     )
     
     if not order:
+        log.warning("order_failed_product_unavailable", product_id=product_id)
         return "Error: Could not create order. Product may be out of stock."
     
     product = await ctx.deps.database.get_product(product_id)
     product_name = product.name if product else "Unknown"
     
+    log.info("order_placed_successfully", order_id=order.id, product_name=product_name)
     return (
         f"Order placed successfully!\n"
         f"Order ID: {order.id}\n"
@@ -141,8 +150,10 @@ async def place_order(
 async def check_business_hours(ctx: RunContext[AppContext]) -> str:
     """Check if customer service is available based on current time."""
     hour = ctx.deps.current_time.hour
+    is_available = 9 <= hour < 17
+    log.info("checking_business_hours", hour=hour, is_available=is_available)
     
-    if 9 <= hour < 17:
+    if is_available:
         return (
             f"Customer service is available now! "
             f"Current time: {ctx.deps.current_time.strftime('%H:%M')}"
@@ -163,11 +174,15 @@ async def admin_view_user(ctx: RunContext[AppContext], user_id: int) -> str:
         ctx: Runtime context with app dependencies
         user_id: ID of user to view
     """
+    log.info("admin_viewing_user", admin_user_id=ctx.deps.current_user_id, target_user_id=user_id)
+    
     if not ctx.deps.is_admin:
+        log.warning("admin_access_denied", user_id=ctx.deps.current_user_id)
         return "Error: This function requires admin privileges"
     
     user = await ctx.deps.database.get_user(user_id)
     if not user:
+        log.warning("admin_view_user_not_found", user_id=user_id)
         return f"User with ID {user_id} not found"
     
     orders = await ctx.deps.database.list_user_orders(user_id)
