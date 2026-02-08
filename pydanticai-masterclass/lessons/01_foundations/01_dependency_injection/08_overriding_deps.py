@@ -72,7 +72,7 @@ class MockEmailDeps(EmailDeps):
     """
     
     # Track emails sent during tests
-    sent_emails: list[dict] = field(default_factory=list)
+    sent_emails: list[dict[str, str]] = field(default_factory=list)
     should_fail: bool = False
     
     async def send_email(self, to: str, subject: str, body: str) -> bool:
@@ -259,7 +259,7 @@ async def test_email_failure_handling():
     
     # Email should not be in sent list (it failed)
     assert len(mock_deps.sent_emails) == 0, "Should not record failed emails"
-    assert "✗" in result, "Should indicate failure with ✗ symbol"
+    assert "Failed to send" in result, "Should indicate failure"
     
     print("✓ Test passed: Failure handled correctly\n")
 
