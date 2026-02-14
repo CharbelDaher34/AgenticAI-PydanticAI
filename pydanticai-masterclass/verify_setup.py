@@ -121,7 +121,7 @@ async def test_simple_agent():
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
         
         # Configure logfire quietly
-        logfire.configure()
+        logfire.configure(console=False)
         logfire.instrument_pydantic_ai()
         
         # Create simple agent

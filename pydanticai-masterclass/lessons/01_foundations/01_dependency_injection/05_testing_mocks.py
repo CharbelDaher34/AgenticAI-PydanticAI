@@ -30,7 +30,7 @@ os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 log = get_logger(__name__)
 
 # Configure Logfire
-logfire.configure()
+logfire.configure(console=False)
 logfire.instrument_pydantic_ai()
 
 

@@ -30,7 +30,7 @@ log = get_logger(__name__)
 os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
 # Configure Logfire
-logfire.configure()
+logfire.configure(console=False)
 logfire.instrument_pydantic_ai()
 
 
@@ -50,7 +50,7 @@ class ValidationDeps:
 
 # Simple content moderation agent
 content_agent = Agent[ValidationDeps, str](
-    "openai:gpt-4o-mini",
+    "openai:gpt-4.1-mini",
     system_prompt=(
         "You are a helpful customer service assistant. "
         "Provide friendly and professional responses to customer inquiries."

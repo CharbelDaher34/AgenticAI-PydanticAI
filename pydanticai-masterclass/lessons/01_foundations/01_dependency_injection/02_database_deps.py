@@ -25,7 +25,7 @@ from common.database import MockDatabase
 os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
 # Configure Logfire
-logfire.configure()
+logfire.configure(console=False)
 logfire.instrument_pydantic_ai()
 
 # Get structured logger
@@ -240,11 +240,11 @@ async def main():
     print("DATABASE DEPENDENCY INJECTION EXAMPLES")
     print("=" * 80 + "\n")
     
-    await example_product_search()
-    await example_product_details()
+    # await example_product_search()
+    # await example_product_details()
     await example_category_browse()
-    await example_order_history()
-    await example_complex_query()
+    # await example_order_history()
+    # await example_complex_query()
     
     print("=" * 80)
     print("Check Logfire dashboard to see all database queries traced!")

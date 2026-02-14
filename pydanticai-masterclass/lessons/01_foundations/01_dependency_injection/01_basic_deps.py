@@ -27,7 +27,7 @@ log = get_logger(__name__)
 os.environ["OPENAI_API_KEY"] = settings.openai_api_key
 
 # Configure Logfire for tracing
-logfire.configure()
+logfire.configure(console=False)
 logfire.instrument_pydantic_ai()
 
 # Example 1: Simple string dependency
@@ -179,9 +179,9 @@ async def main():
     print("BASIC DEPENDENCY INJECTION EXAMPLES")
     print("=" * 80 + "\n")
     
-    await example_simple_dependency()
-    await example_user_id_dependency()
-    await example_datetime_dependency()
+    # await example_simple_dependency()
+    # await example_user_id_dependency()
+    # await example_datetime_dependency()
     await example_reusing_agent()
     
     print("=" * 80)

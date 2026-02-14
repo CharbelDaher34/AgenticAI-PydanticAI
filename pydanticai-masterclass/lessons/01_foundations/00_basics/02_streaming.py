@@ -33,7 +33,7 @@ log = get_logger(__name__)
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 # Configure Logfire
-logfire.configure()
+logfire.configure(console=False)
 logfire.instrument_pydantic_ai()
 
 streaming_agent = Agent(
