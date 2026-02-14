@@ -126,7 +126,7 @@ async def test_simple_agent():
         
         # Create simple agent
         agent = Agent(
-            "openai:gpt-4o-mini",
+            "openai:gpt-4.1-nano",
             system_prompt="You are a test assistant. Respond with exactly: 'Test successful!'",
         )
         
@@ -137,7 +137,7 @@ async def test_simple_agent():
         print(f"  ✓ Response: {result.output[:50]}...")
         
         return True
-    except Exception as e:
+    except Exception as e:cl
         print(f"  ✗ Agent test failed: {e}")
         return False
 
