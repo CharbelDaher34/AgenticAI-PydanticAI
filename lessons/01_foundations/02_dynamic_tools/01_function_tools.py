@@ -149,7 +149,7 @@ def calculate_discount(price: float, discount_percent: float) -> str:
     # Pure calculation - no need for context
     if discount_percent < 0 or discount_percent > 100:
         return "Invalid discount percentage. Must be between 0 and 100."
-    
+    log.info("Calculating discount for price {} with discount {}", price=price, discount_percent=discount_percent)
     discount_amount = price * (discount_percent / 100)
     final_price = price - discount_amount
     
@@ -228,7 +228,7 @@ async def example_complex_query():
     db = MockDatabase()
     
     result = await product_agent.run(
-        "Search for furniture, then tell me the details of the cheapest item you found",
+        "Search for Furniture, then tell me the details of the cheapest item you found",
         deps=db,
     )
     

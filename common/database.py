@@ -143,14 +143,24 @@ class MockDatabase:
         return products
     
     async def search_products(self, query: str) -> list[Product]:
-        """Search products by name or description."""
+        """Search products by name or description using fuzzy matching."""
+        from fuzzywuzzy import fuzz
+
         query_lower = query.lower()
+
         return [
             p
             for p in self.products.values()
-            if query_lower in p.name.lower()
-            or (p.description and query_lower in p.description.lower())
+            if (
+                fuzz.partial_ratio(query_lower, p.name.lower()) >= 70
+                or (
+                    p.description
+                    and fuzz.partial_ratio(query_lower, p.description.lower()) >= 70
+                )
+                or fuzz.partial_ratio(query_lower, p.category.lower()) >= 70
+            )
         ]
+
     
     # Order operations
     async def get_order(self, order_id: int) -> Optional[Order]:

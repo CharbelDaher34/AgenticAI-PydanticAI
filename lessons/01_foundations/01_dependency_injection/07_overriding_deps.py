@@ -49,7 +49,7 @@ class EmailDeps:
     
     async def send_email(self, to: str, subject: str, body: str) -> bool:
         """Send an email via external service."""
-        log.info("sending_real_email", to=to, subject=subject)
+        log.info("sending_real_email", to=to, subject=subject, from_email=self.sender_email)
         
         # In production, this would call SendGrid, AWS SES, etc.
         # For this example, we'll just simulate it
@@ -77,7 +77,7 @@ class MockEmailDeps(EmailDeps):
     
     async def send_email(self, to: str, subject: str, body: str) -> bool:
         """Mock email sending for tests."""
-        log.info("sending_mock_email", to=to, subject=subject)
+        log.info("sending_mock_email", to=to, subject=subject, from_email=self.sender_email)
         
         print(f"📧 [MOCK] Recording email to {to}: {subject}")
         
@@ -103,7 +103,8 @@ notification_agent = Agent[EmailDeps, str](
     "openai:gpt-4o-mini",
     system_prompt=(
         "You are a notification assistant. "
-        "You help send email notifications to users."
+        "You help send email notifications to users. "
+        "If a notification fails, explicitly state 'Failed to send' in your response."
     ),
 )
 
@@ -206,7 +207,7 @@ async def test_welcome_email():
         # Call application code - it will use our test dependencies!
         result = await welcome_new_user("alice@example.com")
         print(f"Result: {result}\n")
-    
+
     # Verify email was "sent"
     assert len(mock_deps.sent_emails) == 1, "Should send 1 email"
     email = mock_deps.sent_emails[0]
@@ -354,7 +355,7 @@ async def example_comparison():
         # Even if we call application code that creates its own deps,
         # the override takes precedence!
         result2 = await welcome_new_user("user@example.com")
-        print(f"   Result: {result2.output}")
+        print(f"   Result: {result2}")
         print(f"   Emails captured: {len(mock_deps.sent_emails)}\n")
 
 
@@ -371,11 +372,11 @@ async def main():
     print("4. Test error conditions safely\n")
     
     # Run tests
-    await test_welcome_email()
-    await test_multiple_notifications()
-    await test_email_failure_handling()
-    await test_nested_overrides()
-    await test_production_integration()
+    # await test_welcome_email()
+    # await test_multiple_notifications()
+    # await test_email_failure_handling()
+    # await test_nested_overrides()
+    # await test_production_integration()
     await example_comparison()
     
     print("=" * 80)

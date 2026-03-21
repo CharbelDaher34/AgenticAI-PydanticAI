@@ -296,9 +296,9 @@ async def main():
     print("DYNAMIC SYSTEM PROMPT EXAMPLES")
     print("=" * 80 + "\n")
     
-    await example_free_tier_user()
-    await example_pro_tier_user()
-    await example_enterprise_user()
+    # await example_free_tier_user()
+    # await example_pro_tier_user()
+    # await example_enterprise_user()
     await example_time_awareness()
     await example_same_agent_different_users()
     

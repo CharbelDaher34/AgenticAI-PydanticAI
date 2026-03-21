@@ -49,8 +49,8 @@ try:
     DUCKDUCKGO_AVAILABLE = True
 except ImportError:
     DUCKDUCKGO_AVAILABLE = False
-    print("Note: DuckDuckGo tool requires 'duckduckgo-search' package")
-    print("Install with: uv add duckduckgo-search\n")
+    print("Note: DuckDuckGo tool requires the duckduckgo optional group")
+    print('Install with: pip install "pydantic-ai-slim[duckduckgo]"\n')
 
 
 # Example 2: Tavily Search (Paid with free tier)
@@ -122,8 +122,8 @@ async def example_duckduckgo():
     """Example: Using DuckDuckGo for free web search."""
     if not DUCKDUCKGO_AVAILABLE:
         print("=== Example 1: DuckDuckGo Search (Not Available) ===\n")
-        print("Install duckduckgo-search to use this tool")
-        print("Command: uv add duckduckgo-search\n")
+        print('Install duckduckgo-search to use this tool')
+        print('Command: pip install "pydantic-ai-slim[duckduckgo]"\n')
         return
     
     print("=== Example 1: DuckDuckGo Search ===\n")
@@ -280,10 +280,10 @@ async def main():
     print("- Tavily: Best for production with LLM-optimized results")
     print("- Exa: Best for semantic/neural search and research tasks")
     print("- Choose based on your needs: free vs quality vs features")
-    print("\nSetup:")
-    print("1. DuckDuckGo: uv add duckduckgo-search")
-    print("2. Tavily: Set TAVILY_API_KEY (free tier available)")
-    print("3. Exa: Set EXA_API_KEY")
+    print("Setup:")
+    print('1. DuckDuckGo: pip install "pydantic-ai-slim[duckduckgo]"')
+    print("2. Tavily: Set TAVILY_API_KEY (free tier at https://tavily.com)")
+    print('3. Exa: pip install "pydantic-ai-slim[exa]" + set EXA_API_KEY')
     print("\nCheck Logfire dashboard to see search tool usage!")
     print("=" * 80 + "\n")
 

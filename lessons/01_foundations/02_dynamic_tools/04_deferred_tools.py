@@ -16,8 +16,15 @@ from pathlib import Path
 from typing import Optional
 
 import logfire
-from pydantic_ai import Agent, ApprovalRequired, CallDeferred, RunContext
-from pydantic_ai.result import DeferredToolRequests, DeferredToolResults, ToolDenied
+from pydantic_ai import (
+    Agent,
+    ApprovalRequired,
+    CallDeferred,
+    DeferredToolRequests,
+    DeferredToolResults,
+    RunContext,
+    ToolDenied,
+)
 
 # Add common directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -282,7 +289,10 @@ async def example_conditional_approval():
     
     if isinstance(result.output, DeferredToolRequests):
         print(f"Approval required! File is protected.")
-        print(f"Metadata: {result.output.approvals[0].metadata}\n")
+        # Metadata is stored on requests.metadata keyed by tool_call_id
+        call = result.output.approvals[0]
+        meta = result.output.metadata.get(call.tool_call_id, {})
+        print(f"Metadata: {meta}\n")
         
         # Approve and continue
         results = DeferredToolResults()
@@ -353,8 +363,11 @@ async def example_external_execution():
         
         # Step 2: Simulate external processing
         print("Step 2: External system processes the task...")
-        for call in result.output.calls:
-            task_id = call.metadata.get("task_id")
+        requests = result.output
+        for call in requests.calls:
+            # Metadata is stored on requests.metadata keyed by tool_call_id
+            call_meta = requests.metadata.get(call.tool_call_id, {})
+            task_id = call_meta.get("task_id")
             print(f"  Processing task: {task_id}")
             
             # Simulate task completion
@@ -366,8 +379,9 @@ async def example_external_execution():
         print("\nStep 3: Sending results back to agent...\n")
         results = DeferredToolResults()
         
-        for call in result.output.calls:
-            task_id = call.metadata.get("task_id")
+        for call in requests.calls:
+            call_meta = requests.metadata.get(call.tool_call_id, {})
+            task_id = call_meta.get("task_id")
             task_result = pending_tasks[task_id]["result"]
             results.calls[call.tool_call_id] = task_result
         

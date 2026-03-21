@@ -50,11 +50,13 @@ class ValidationDeps:
 
 # Simple content moderation agent
 content_agent = Agent[ValidationDeps, str](
-    "openai:gpt-4.1-mini",
-    system_prompt=(
+    "openai:gpt-4.1",
+    system_prompt=( 
         "You are a helpful customer service assistant. "
         "Provide friendly and professional responses to customer inquiries."
+        "Be concise and to the point."
     ),
+    
 )
 
 
@@ -69,11 +71,33 @@ async def validate_content(ctx: RunContext[ValidationDeps], output: str) -> str:
     
     If validation fails, raise ModelRetry to have the agent try again.
     """
-    log.info("validating_output", length=len(output))
+    # Log the attempt number/info
+    log.info("validating_output", length=len(output), attempt=ctx.retry + 1)
     
     # Check length
     if len(output) > ctx.deps.max_length:
-        log.warning("output_too_long", length=len(output), max=ctx.deps.max_length)
+        # Get the input (last user message) for context
+        # Note: simplistic extraction of the last user text part
+        last_input = "Unknown"
+        for msg in reversed(ctx.messages):
+            if msg.kind == 'request':
+                # Try to find text content
+                # This handles simple cases; complex cases might need more robust parsing
+                for part in msg.parts:
+                    if part.part_kind == 'user-prompt':
+                        last_input = part.content
+                        break
+                if last_input != "Unknown":
+                    break
+
+        log.warning(
+            "validation_failed_length", 
+            current_length=len(output), 
+            max_length=ctx.deps.max_length,
+            input_prompt=last_input,
+            draft_output=output
+        )
+        
         raise ModelRetry(
             f"Response is too long ({len(output)} characters). "
             f"Please keep it under {ctx.deps.max_length} characters."
@@ -83,7 +107,7 @@ async def validate_content(ctx: RunContext[ValidationDeps], output: str) -> str:
     output_lower = output.lower()
     for banned_word in ctx.deps.banned_words:
         if banned_word.lower() in output_lower:
-            log.warning("banned_word_found", word=banned_word)
+            log.warning("validation_failed_banned_word", word=banned_word, draft_output=output)
             raise ModelRetry(
                 f"Your response contains inappropriate content. "
                 f"Please rephrase without using '{banned_word}'."
@@ -94,12 +118,12 @@ async def validate_content(ctx: RunContext[ValidationDeps], output: str) -> str:
         greetings = ["hello", "hi", "hey", "greetings", "welcome"]
         has_greeting = any(greeting in output_lower for greeting in greetings)
         if not has_greeting:
-            log.warning("missing_greeting")
+            log.warning("validation_failed_missing_greeting", draft_output=output)
             raise ModelRetry(
                 "Please start your response with a friendly greeting."
             )
     
-    log.info("validation_passed")
+    log.info("validation_success", details="All checks passed")
     return output
 
 
@@ -150,13 +174,13 @@ async def example_required_greeting():
         max_length=500,
         require_greeting=True,
     )
-    
+    query = "what are your business hours? tell me hi"
     result = await content_agent.run(
-        "What are your business hours?",
+        query,
         deps=deps,
     )
     
-    print(f"User: What are your business hours?")
+    print(f"User: {query}")
     print(f"Agent: {result.output}\n")
 
 
@@ -171,7 +195,7 @@ async def example_multi_constraint():
     )
     
     result = await content_agent.run(
-        "Why should I choose your service?",
+        "Why should I choose your service? tell me hi love in a concise way",
         deps=deps,
     )
     
@@ -190,7 +214,7 @@ class DatabaseValidationDeps:
 
 order_agent = Agent[DatabaseValidationDeps, str](
     "openai:gpt-4o-mini",
-    system_prompt="You are an order management assistant. Provide order status updates.",
+    system_prompt="You are an order management assistant. Provide order status updates.All orders are shipped",
 )
 
 
@@ -203,13 +227,11 @@ async def validate_order_info(ctx: RunContext[DatabaseValidationDeps], output: s
     log.info("validating_order_info")
     
     # Check if output mentions invalid product IDs
-    # Simple check: look for "product [ID]" pattern
-    
     product_mentions = re.findall(r'product\s+(\d+)', output.lower())
     for product_id_str in product_mentions:
         product_id = int(product_id_str)
         if product_id not in ctx.deps.valid_product_ids:
-            log.warning("invalid_product_id", product_id=product_id)
+            log.warning("validation_failed_invalid_product", product_id=product_id, draft_output=output)
             raise ModelRetry(
                 f"Product ID {product_id} does not exist. "
                 f"Please only reference valid products."
@@ -222,13 +244,13 @@ async def validate_order_info(ctx: RunContext[DatabaseValidationDeps], output: s
     )
     for status in status_mentions:
         if status not in ctx.deps.valid_order_statuses:
-            log.warning("invalid_status", status=status)
+            log.warning("validation_failed_invalid_status", status=status, draft_output=output)
             raise ModelRetry(
                 f"'{status}' is not a valid order status. "
                 f"Use one of: {', '.join(ctx.deps.valid_order_statuses)}"
             )
     
-    log.info("order_validation_passed")
+    log.info("order_validation_success")
     return output
 
 
@@ -263,11 +285,30 @@ async def main():
     print("3. Automatically retry when validation fails")
     print("4. Implement content moderation policies\n")
     
-    await example_length_validation()
-    await example_content_moderation()
-    await example_required_greeting()
-    await example_multi_constraint()
-    await example_data_validation()
+    # try:
+    #     await example_length_validation()
+    # except Exception as e:
+    #     print(f"❌ Error in example_length_validation: {e}")
+        
+    # try:
+    #     await example_content_moderation()
+    # except Exception as e:
+    #     print(f"❌ Error in example_content_moderation: {e}")
+        
+    # try:
+    #     await example_required_greeting()
+    # except Exception as e:
+    #     print(f"❌ Error in example_required_greeting: {e}")
+        
+    # try:
+    #     await example_multi_constraint()
+    # except Exception as e:
+    #     print(f"❌ Error in example_multi_constraint: {e}")
+
+    try:
+        await example_data_validation()
+    except Exception as e:
+        print(f"❌ Error in example_data_validation: {e}")
     
     print("=" * 80)
     print("Key Takeaways:")

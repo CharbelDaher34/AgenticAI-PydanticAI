@@ -12,8 +12,7 @@ This lesson covers dependency injection patterns in PydanticAI, one of the most 
 4. **Dynamic System Prompts** - Using dependencies in system prompts
 5. **Testing with Mocks** - How DI makes testing easier
 6. **Output Validators** - Using dependencies to validate agent output
-7. **Sync vs Async** - Choosing between synchronous and asynchronous dependencies
-8. **Overriding Dependencies** - Testing with agent.override()
+7. **Overriding Dependencies** - Testing with agent.override()
 
 ## Key Concepts
 
@@ -58,8 +57,7 @@ Dependencies can be:
 4. **04_dynamic_prompts.py** - Dynamic system prompts using dependencies
 5. **05_testing_mocks.py** - Testing agents with mock dependencies
 6. **06_output_validators.py** - Using dependencies in output validators
-7. **07_sync_vs_async_deps.py** - Synchronous vs asynchronous dependencies
-8. **08_overriding_deps.py** - Testing with agent.override()
+7. **07_overriding_deps.py** - Testing with agent.override()
 
 ## Running the Examples
 

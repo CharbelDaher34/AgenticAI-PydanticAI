@@ -16,8 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import logfire
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets import FunctionToolset, CombinedToolset
+from pydantic_ai import Agent, CombinedToolset, FunctionToolset, RunContext
 
 # Add common directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))

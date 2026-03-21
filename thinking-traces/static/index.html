@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PydanticAI Trace Visualizer</title>
+    <meta name="description"
+        content="Visualize PydanticAI agent traces in real-time — thinking, tool calls, results, and streaming text." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+
+    <!-- ── Ambient Background ─────────────────────────────────────────────────── -->
+    <div class="ambient-bg">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <!-- ── App Shell ─────────────────────────────────────────────────────────── -->
+    <div class="app">
+
+        <!-- Sidebar: Config Panel -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <circle cx="14" cy="14" r="13" stroke="url(#grad)" stroke-width="2" />
+                        <path d="M8 14l4 4 8-8" stroke="url(#grad)" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" />
+                        <defs>
+                            <linearGradient id="grad" x1="0" y1="0" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#818cf8" />
+                                <stop offset="1" stop-color="#c084fc" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                    <span class="logo-text">Trace<span class="logo-accent">Viz</span></span>
+                </div>
+                <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round">
+                        <line x1="3" y1="12" x2="21" y2="12" />
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                </button>
+            </div>
+
+            <div class="sidebar-body">
+                <!-- Provider -->
+                <div class="form-group">
+                    <label for="provider">Provider</label>
+                    <div class="select-wrapper">
+                        <select id="provider">
+                            <optgroup label="OpenAI">
+                                <option value="openai">OpenAI Chat</option>
+                                <option value="openai-responses">OpenAI Responses (reasoning)</option>
+                            </optgroup>
+                            <optgroup label="Anthropic">
+                                <option value="anthropic">Anthropic (extended thinking)</option>
+                                <option value="anthropic-adaptive">Anthropic (adaptive thinking)</option>
+                            </optgroup>
+                            <optgroup label="Google">
+                                <option value="google">Google Gemini</option>
+                            </optgroup>
+                            <optgroup label="Other">
+                                <option value="groq">Groq</option>
+                                <option value="xai">xAI (Grok)</option>
+                                <option value="openrouter">OpenRouter</option>
+                            </optgroup>
+                            <optgroup label="AWS Bedrock">
+                                <option value="bedrock-anthropic">Bedrock (Anthropic)</option>
+                                <option value="bedrock-openai">Bedrock (OpenAI-compat)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Model Name -->
+                <div class="form-group">
+                    <label for="model_name">Model</label>
+                    <input id="model_name" type="text" value="gpt-4o" placeholder="e.g. gpt-4o" />
+                </div>
+
+                <!-- Thinking toggle -->
+                <div class="form-group toggle-group">
+                    <label for="enable_thinking">Enable Thinking</label>
+                    <label class="toggle">
+                        <input type="checkbox" id="enable_thinking" />
+                        <span class="track"></span>
+                    </label>
+                </div>
+
+                <!-- Thinking Budget (shown only when thinking is on) -->
+                <div class="form-group" id="thinkingBudgetGroup" style="display:none">
+                    <label for="thinking_budget">Thinking budget (tokens)</label>
+                    <input id="thinking_budget" type="number" value="8000" min="1024" step="1024" placeholder="8000" />
+                </div>
+
+                <!-- Temperature -->
+                <div class="form-group">
+                    <label for="temperature">Temperature <span id="tempVal">—</span></label>
+                    <input id="temperature" type="range" min="0" max="2" step="0.05" value="1" />
+                </div>
+
+                <!-- Max Tokens -->
+                <div class="form-group">
+                    <label for="max_tokens">Max tokens</label>
+                    <input id="max_tokens" type="number" placeholder="e.g. 2048" min="1" />
+                </div>
+
+                <!-- System Prompt -->
+                <div class="form-group">
+                    <label for="system_prompt">System prompt</label>
+                    <textarea id="system_prompt" rows="3"
+                        placeholder="You are a helpful assistant.">You are a precise math tutor. Think step-by-step before answering. Use the provided tools for every arithmetic operation — never compute in your head.</textarea>
+                </div>
+
+                <!-- User Prompt -->
+                <div class="form-group">
+                    <label for="user_prompt">User prompt</label>
+                    <textarea id="user_prompt" rows="4"
+                        placeholder="Enter your question...">What is (144 × 12) ÷ 2 + 10 − 5? Show each step and verify the final answer.</textarea>
+                </div>
+
+                <!-- Tools section -->
+                <div class="form-group tools-section">
+                    <div class="tools-header">
+                        <label>Tools</label>
+                        <button class="btn-icon" id="addTool" title="Add tool">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2.5" stroke-linecap="round">
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="toolsList" class="tools-list">
+                        <!-- tools will be added here -->
+                    </div>
+                </div>
+
+                <!-- Run button -->
+                <button class="btn-run" id="runBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                    </svg>
+                    Run Agent
+                </button>
+
+                <!-- Status pill -->
+                <div class="status-row">
+                    <div class="status-dot idle" id="statusDot"></div>
+                    <span class="status-label" id="statusLabel">Idle</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main: Trace Stream -->
+        <main class="main" id="main">
+            <div class="topbar">
+                <div class="topbar-left">
+                    <button class="btn-icon mobile-toggle" id="mobileSidebarToggle">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round">
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                            <line x1="3" y1="6" x2="21" y2="6" />
+                            <line x1="3" y1="18" x2="21" y2="18" />
+                        </svg>
+                    </button>
+                    <h1 class="page-title">Trace Stream</h1>
+                </div>
+                <div class="topbar-right">
+                    <button class="btn-ghost" id="clearBtn">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14H6L5 6" />
+                            <path d="M10 11v6" />
+                            <path d="M14 11v6" />
+                        </svg>
+                        Clear
+                    </button>
+                    <div class="token-counter" id="tokenCounter">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="8" x2="12" y2="12" />
+                            <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <span id="tokenCount">0 tokens</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Legend -->
+            <div class="legend">
+                <span class="legend-item thinking-legend"><span class="legend-dot"></span>Thinking</span>
+                <span class="legend-item tool-call-legend"><span class="legend-dot"></span>Tool Call</span>
+                <span class="legend-item tool-result-legend"><span class="legend-dot"></span>Tool Result</span>
+                <span class="legend-item text-legend"><span class="legend-dot"></span>Text</span>
+                <span class="legend-item final-legend"><span class="legend-dot"></span>Final Output</span>
+            </div>
+
+            <!-- Timeline / Trace Feed -->
+            <div class="trace-feed" id="traceFeed">
+                <!-- Empty state -->
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">
+                        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                            <path d="M2 17l10 5 10-5" />
+                            <path d="M2 12l10 5 10-5" />
+                        </svg>
+                    </div>
+                    <h2>No traces yet</h2>
+                    <p>Configure your agent on the left and click <strong>Run Agent</strong> to start streaming traces.
+                    </p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ── Tool Editor Modal ───────────────────────────────────────────────────── -->
+    <div class="modal-overlay" id="toolModal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Add Tool</h3>
+                <button class="btn-icon" id="closeModal">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="toolName">Function name</label>
+                    <input id="toolName" type="text" placeholder="multiply" />
+                </div>
+                <div class="form-group">
+                    <label for="toolCode">Python code</label>
+                    <textarea id="toolCode" rows="8" spellcheck="false" placeholder="def multiply(a: int, b: int) -> int:
+    &quot;&quot;&quot;Multiply two integers.&quot;&quot;&quot;
+    return a * b"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-ghost" id="cancelTool">Cancel</button>
+                <button class="btn-run small" id="saveTool">Add Tool</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

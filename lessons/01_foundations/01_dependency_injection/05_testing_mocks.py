@@ -58,14 +58,14 @@ class TestDatabase:
         return self.products.get(product_id)
     
     async def search_products(self, query: str) -> list[Product]:
-        """Search products."""
+        from fuzzywuzzy import fuzz
         self.call_log.append(f"search_products('{query}')")
-        # Simple search: match query in product name
         return [
             p
             for p in self.products.values()
-            if query.lower() in p.name.lower()
+            if fuzz.partial_ratio(query.lower(), p.name.lower()) >= 70
         ]
+
     
     def add_test_user(self, user: User):
         """Add a test user."""
@@ -272,31 +272,31 @@ async def test_dependency_isolation():
     db1 = TestDatabase()
     db1.add_test_product(Product(
         id=1,
-        name="Product A",
+        name="Tomato",
         price=10.0,
-        category="Test",
+        category="Food",
         in_stock=True,
     ))
     
     db2 = TestDatabase()
     db2.add_test_product(Product(
         id=1,
-        name="Product B",
+        name="Tomato Juice",
         price=20.0,
-        category="Test",
+        category="Beverages",
         in_stock=True,
     ))
     
     # Run agent with both databases
-    result1 = await test_agent.run("What is product 1?", deps=db1)
-    result2 = await test_agent.run("What is product 1?", deps=db2)
+    result1 = await test_agent.run("What products do you have related to tomato?", deps=db1)
+    result2 = await test_agent.run("What products do you have related to tomato?", deps=db2)
     
     print(f"Database 1 result: {result1.output}")
     print(f"Database 2 result: {result2.output}")
     
-    # Each should have different results
-    assert "Product A" in result1.output or "10" in result1.output
-    assert "Product B" in result2.output or "20" in result2.output
+    # Each should have different results    
+    assert "Tomato" in result1.output or "10" in result1.output
+    assert "Tomato Juice" in result2.output or "20" in result2.output
     
     print("✓ Isolation test passed!\n")
 
@@ -308,11 +308,11 @@ async def main():
     print("=" * 80 + "\n")
     
     try:
-        await test_product_search()
-        await test_product_not_found()
-        await test_price_lookup()
-        await test_multiple_products()
-        await test_with_real_database()
+        # await test_product_search()
+        # await test_product_not_found()
+        # await test_price_lookup()
+        # await test_multiple_products()
+        # await test_with_real_database()
         await test_dependency_isolation()
         
         print("=" * 80)

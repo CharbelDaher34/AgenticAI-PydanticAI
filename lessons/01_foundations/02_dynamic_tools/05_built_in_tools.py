@@ -19,11 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 import logfire
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.builtin_tools import (
-    CodeExecutionTool,
-    WebSearchTool,
-)
+from pydantic_ai import Agent, CodeExecutionTool, RunContext, WebSearchTool
 
 # Add common directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -264,12 +260,13 @@ async def main():
     print("5. Provider-specific - Different providers support different built-in tools\n")
     
     print("Available Built-in Tools:")
-    print("- WebSearchTool (OpenAI, Anthropic, Google, xAI, Groq)")
-    print("- CodeExecutionTool (OpenAI, Anthropic)")
-    print("- ImageGenerationTool (OpenAI)")
-    print("- WebFetchTool (Anthropic)")
-    print("- MemoryTool (Anthropic)")
-    print("- FileSearchTool (OpenAI)\n")
+    print("- WebSearchTool    (OpenAI Responses, Anthropic, Google, xAI, Groq)")
+    print("- CodeExecutionTool (OpenAI, Anthropic, Google, xAI, Bedrock)")
+    print("- ImageGenerationTool (OpenAI Responses, Google)")
+    print("- WebFetchTool     (Anthropic, Google)")
+    print("- MemoryTool       (Anthropic)")
+    print("- MCPServerTool    (Anthropic)")
+    print("- FileSearchTool   (OpenAI)\n")
     
     print("=" * 80 + "\n")
     

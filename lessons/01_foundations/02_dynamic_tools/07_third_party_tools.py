@@ -84,26 +84,27 @@ try:
     from pydantic_ai.ext.aci import tool_from_aci, ACIToolset
     
     # Check if ACI credentials are available
-    aci_account_id = os.environ.get("ACI_ACCOUNT_ID")
+    # ACI requires: ACI_API_KEY env var + LINKED_ACCOUNT_OWNER_ID
     aci_api_key = os.environ.get("ACI_API_KEY")
+    linked_account_owner_id = os.environ.get("LINKED_ACCOUNT_OWNER_ID")
     
-    if aci_account_id and aci_api_key:
-        # Create a single ACI tool
-        # github_tool = tool_from_aci(
-        #     tool_name="github_search",
-        #     linked_account_owner_id=aci_account_id,
+    if aci_api_key and linked_account_owner_id:
+        # Create a single ACI tool (tool names use UPPERCASE__ACTION format)
+        # tavily_tool = tool_from_aci(
+        #     'TAVILY__SEARCH',
+        #     linked_account_owner_id=linked_account_owner_id,
         # )
         
         # Or create a toolset with multiple ACI tools
         # aci_toolset = ACIToolset(
-        #     tools=["github_search", "notion_search"],
-        #     linked_account_owner_id=aci_account_id,
+        #     ['OPEN_WEATHER_MAP__CURRENT_WEATHER', 'OPEN_WEATHER_MAP__FORECAST'],
+        #     linked_account_owner_id=linked_account_owner_id,
         # )
         
         ACI_AVAILABLE = False  # Disabled for demo - requires ACI setup
     else:
         ACI_AVAILABLE = False
-        print("Note: ACI.dev integration requires ACI_ACCOUNT_ID and ACI_API_KEY")
+        print("Note: ACI.dev integration requires ACI_API_KEY and LINKED_ACCOUNT_OWNER_ID")
         print("Sign up at: https://aci.dev\n")
 except ImportError:
     ACI_AVAILABLE = False
@@ -169,21 +170,22 @@ async def example_aci_tools():
         print("- And many more...")
         print("\nSetup:")
         print("1. Sign up at https://aci.dev")
-        print("2. Set ACI_ACCOUNT_ID and ACI_API_KEY environment variables")
+        print("2. Install: pip install aci-sdk")
+        print("3. Set ACI_API_KEY and LINKED_ACCOUNT_OWNER_ID env vars")
         print("\nPattern:")
         print("```python")
         print("from pydantic_ai.ext.aci import tool_from_aci, ACIToolset")
         print("")
-        print("# Single tool")
-        print("github_tool = tool_from_aci(")
-        print("    tool_name='github_search',")
-        print("    linked_account_owner_id=account_id,")
+        print("# Single tool (names use UPPERCASE__ACTION format)")
+        print("tavily_tool = tool_from_aci(")
+        print("    'TAVILY__SEARCH',")
+        print("    linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),")
         print(")")
         print("")
         print("# Multiple tools as toolset")
         print("aci_toolset = ACIToolset(")
-        print("    tools=['github_search', 'notion_search'],")
-        print("    linked_account_owner_id=account_id,")
+        print("    ['OPEN_WEATHER_MAP__CURRENT_WEATHER', 'OPEN_WEATHER_MAP__FORECAST'],")
+        print("    linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),")
         print(")")
         print("```\n")
         return
@@ -283,7 +285,7 @@ async def main():
     print("- Choose based on needs: ecosystem size, management, control")
     print("\nSetup:")
     print("1. LangChain: uv add langchain-community")
-    print("2. ACI.dev: Set ACI_ACCOUNT_ID and ACI_API_KEY")
+    print("2. ACI.dev: pip install aci-sdk, set ACI_API_KEY and LINKED_ACCOUNT_OWNER_ID")
     print("\nNote: These examples show integration patterns.")
     print("Install required packages to test functionality.")
     print("\nCheck Logfire dashboard to see third-party tool integration!")
