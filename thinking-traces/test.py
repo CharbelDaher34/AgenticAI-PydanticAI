@@ -2,12 +2,17 @@
 PydanticAIClient — dynamic tools, swappable providers, full streaming traces.
 Fixed: thinking traces now stream correctly via PartStartEvent tracking.
 
-pip install pydantic-ai
+pip install pydantic-ai ddgs
 """
 from dotenv import load_dotenv
 load_dotenv()
+import ast
 import asyncio
+import io
+import operator as operator_mod
+import textwrap
 from collections.abc import AsyncGenerator, Callable
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -28,8 +33,30 @@ from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.groq import GroqModel, GroqModelSettings
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel, OpenAIResponsesModelSettings
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
-from pydantic_ai.models.xai import XaiModel, XaiModelSettings
 from pydantic_ai.settings import ModelSettings
+from ddgs import DDGS
+
+
+# ── Default system instructions (app merges user-editable text from the UI) ─
+DEFAULT_AGENT_SYSTEM_BASE = """You are a capable assistant. Use tools when they help.
+
+Rules:
+- Your final reply must fully answer the user: include every important fact, number, and conclusion—including everything you got from tools or reasoning. Do not omit requested details.
+- After tool calls, synthesize tool outputs clearly in the answer text (do not assume the user only sees traces).
+- In multi-turn chat, use earlier messages for context unless the user changes topic.
+- Prefer concise wording, but never sacrifice completeness for brevity.
+- Match the user's language when appropriate."""
+
+
+def merge_system_prompt(user_extra: str) -> str:
+    """Same merge as the web server: base + optional user text + today's date."""
+    merged = DEFAULT_AGENT_SYSTEM_BASE.strip()
+    extra = (user_extra or "").strip()
+    if extra:
+        merged = f"{merged}\n\n--- Additional instructions ---\n{extra}"
+    if "Today's date:" not in merged:
+        merged += f"\n\nToday's date: {datetime.now().strftime('%A, %B %d, %Y')}."
+    return merged
 
 
 # ── Trace events ──────────────────────────────────────────────────────────────
@@ -68,16 +95,10 @@ class ToolResultTrace:
     tool_call_id: str
     content: Any
 
-@dataclass
-class FinalOutput:
-    """The complete assembled answer."""
-    content: str
-
 TraceEvent = (
     ThinkingStart | ThinkingDelta | ThinkingEnd
     | TextDelta
     | ToolCallTrace | ToolResultTrace
-    | FinalOutput
 )
 
 # ── Providers ─────────────────────────────────────────────────────────────────
@@ -89,7 +110,6 @@ Provider = Literal[
     "anthropic-adaptive", # Adaptive thinking (claude-opus-4-6 and newer)
     "google",
     "groq",
-    "xai",
     "openrouter",
     "bedrock-anthropic",
     "bedrock-openai",
@@ -166,15 +186,6 @@ def _build_model_and_settings(
             settings = GroqModelSettings(**base, **think) if (base or think) else None
             return model, settings
 
-        # ── xAI ───────────────────────────────────────────────────────────────
-        case "xai":
-            model = XaiModel(model_name)
-            think = (
-                {"xai_include_encrypted_content": True}  # preserve thinking in history
-                if enable_thinking else {}
-            )
-            settings = XaiModelSettings(**base, **think) if (base or think) else None
-            return model, settings
 
         # ── OpenRouter ────────────────────────────────────────────────────────
         case "openrouter":
@@ -333,7 +344,6 @@ class PydanticAIClient:
           TextDelta(content)                   — assistant text chunk
           ToolCallTrace(name, args, id)        — tool about to run
           ToolResultTrace(id, content)         — tool returned
-          FinalOutput(content)                 — complete answer
         """
         agent = self._ensure_agent()
 
@@ -366,6 +376,10 @@ class PydanticAIClient:
                                     for tidx in list(thinking_open):
                                         yield ThinkingEnd(part_index=tidx)
                                         del thinking_open[tidx]
+                                    # Emit any initial text already on the part
+                                    initial = getattr(event.part, "content", None) or ""
+                                    if initial:
+                                        yield TextDelta(content=initial)
 
                             elif isinstance(event, PartDeltaEvent):
                                 idx = event.index
@@ -377,8 +391,11 @@ class PydanticAIClient:
                                     if idx not in thinking_open:
                                         thinking_open[idx] = True
                                         yield ThinkingStart(part_index=idx)
+                                    chunk = delta.content_delta
+                                    if chunk is None:
+                                        chunk = ""
                                     yield ThinkingDelta(
-                                        content=delta.content_delta,
+                                        content=chunk,
                                         part_index=idx,
                                     )
 
@@ -388,7 +405,10 @@ class PydanticAIClient:
                                     for tidx in list(thinking_open):
                                         yield ThinkingEnd(part_index=tidx)
                                         del thinking_open[tidx]
-                                    yield TextDelta(content=delta.content_delta)
+                                    chunk = delta.content_delta
+                                    if chunk is None:
+                                        chunk = ""
+                                    yield TextDelta(content=chunk)
 
                                 # ── Tool-arg delta (partial JSON) ──────────
                                 elif isinstance(delta, ToolCallPartDelta):
@@ -420,11 +440,12 @@ class PydanticAIClient:
 
                 # ── Done ───────────────────────────────────────────────────
                 elif Agent.is_end_node(node):
-                    final = run.result.output if run.result else ""
-                    yield FinalOutput(content=str(final))
+                    pass
 
-        if self._keep_history and run.result:
-            self._history = run.result.all_messages()
+            if self._keep_history:
+                # Snapshot inside the context: after pydantic-ai 1.x, `run.result` may be None
+                # after __aexit__, but `AgentRun.all_messages()` still reflects the full turn.
+                self._history = list(run.all_messages())
 
     # ── Pretty-print helper ───────────────────────────────────────────────────
 
@@ -440,11 +461,12 @@ class PydanticAIClient:
         DIM    = "\033[90m"
         RESET  = "\033[0m"
 
-        output = ""
+        chunks: list[str] = []
         async for event in self.stream(user_prompt, deps=deps):
+            if isinstance(event, TextDelta):
+                chunks.append(event.content)
+
             if not print_traces:
-                if isinstance(event, FinalOutput):
-                    output = event.content
                 continue
 
             match event:
@@ -460,31 +482,152 @@ class PydanticAIClient:
                     print(f"\n{YELLOW}⚙ tool→  {n}({a})  [id={i}]{RESET}")
                 case ToolResultTrace(tool_call_id=i, content=c):
                     print(f"{CYAN}✔ ←tool  [{i}]  {c}{RESET}")
-                case FinalOutput(content=c):
-                    output = c
-                    print()
 
-        return output
+        if print_traces:
+            print()
+        return "".join(chunks)
+
+
+# ── Default demo tools (async + small delays so traces show real work) ───────
+
+_MATH_BINOPS: dict[type, Any] = {
+    ast.Add: operator_mod.add,
+    ast.Sub: operator_mod.sub,
+    ast.Mult: operator_mod.mul,
+    ast.Div: operator_mod.truediv,
+    ast.FloorDiv: operator_mod.floordiv,
+    ast.Mod: operator_mod.mod,
+    ast.Pow: operator_mod.pow,
+}
+_MATH_UNARY: dict[type, Any] = {
+    ast.UAdd: operator_mod.pos,
+    ast.USub: operator_mod.neg,
+}
+
+
+def _eval_math_ast(node: ast.AST) -> float | int:
+    if isinstance(node, ast.Expression):
+        return _eval_math_ast(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError("only numeric constants are allowed")
+        return node.value
+    if isinstance(node, ast.UnaryOp):
+        op_t = type(node.op)
+        if op_t not in _MATH_UNARY:
+            raise ValueError("unsupported unary operator")
+        return _MATH_UNARY[op_t](_eval_math_ast(node.operand))
+    if isinstance(node, ast.BinOp):
+        op_t = type(node.op)
+        if op_t not in _MATH_BINOPS:
+            raise ValueError("unsupported binary operator")
+        return _MATH_BINOPS[op_t](_eval_math_ast(node.left), _eval_math_ast(node.right))
+    raise ValueError("unsupported expression (use numbers and + - * / // % ** only)")
+
+
+async def search_web(query: str) -> str:
+    """Search the web via DuckDuckGo text search (titles, href, body)."""
+    await asyncio.sleep(1.0)
+
+    def _ddg_text_fetch() -> list[dict[str, Any]]:
+        search_query = query.strip()
+        with DDGS() as ddgs:
+            rows = ddgs.text(
+                search_query,
+                region="wt-wt",
+                safesearch="moderate",
+                max_results=1,
+            )
+        return list(rows) if rows else []
+
+    try:
+        results = await asyncio.to_thread(_ddg_text_fetch)
+    except Exception as exc:
+        return f"Search failed: {type(exc).__name__}: {exc}"
+    if not results:
+        return "No results found; try different keywords."
+    lines: list[str] = []
+    for idx, row in enumerate(results):
+        title = str(row.get("title", ""))
+        href = str(row.get("href", ""))
+        body = str(row.get("body", ""))
+        lines.append(f"Result {idx + 1}: {title}")
+        lines.append(f"  URL: {href}")
+        lines.append(f"  Body: {body}")
+    return chr(10).join(lines)[:6000]
+
+
+async def execute_python(code: str) -> str:
+    """Run Python in a restricted environment (math + builtins; use print() for output)."""
+    await asyncio.sleep(1.0)
+    output_buf = io.StringIO()
+
+    def safe_print(*args: Any, **kwargs: Any) -> None:
+        kwargs.pop("file", None)
+        print(*args, file=output_buf, **kwargs)
+
+    safe_builtins: dict[str, Any] = {
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "bool": bool,
+        "chr": chr,
+        "dict": dict,
+        "enumerate": enumerate,
+        "filter": filter,
+        "float": float,
+        "format": format,
+        "int": int,
+        "len": len,
+        "list": list,
+        "map": map,
+        "max": max,
+        "min": min,
+        "pow": pow,
+        "print": safe_print,
+        "range": range,
+        "repr": repr,
+        "reversed": reversed,
+        "round": round,
+        "set": set,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+        "tuple": tuple,
+        "zip": zip,
+        "True": True,
+        "False": False,
+        "None": None,
+    }
+    import math
+
+    namespace: dict[str, Any] = {"__builtins__": safe_builtins, "math": math}
+    try:
+        exec(textwrap.dedent(code), namespace, namespace)
+    except Exception as exc:
+        return f"Error: {type(exc).__name__}: {exc}"
+    text_out = output_buf.getvalue().strip()
+    if text_out:
+        return text_out[:8000]
+    return "(no printed output; use print(...) to show results)"
+
+
+async def evaluate_math(expression: str) -> str:
+    """Evaluate a single arithmetic expression (numbers, + - * / // % **, parentheses)."""
+    await asyncio.sleep(0.65)
+    expr = expression.strip()
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        return f"Syntax error: {exc}"
+    try:
+        value = _eval_math_ast(tree)
+        return repr(value)
+    except Exception as exc:
+        return f"Error: {type(exc).__name__}: {exc}"
 
 
 async def main():
-    # ── Tools ─────────────────────────────────────────────────────────────────
-    def multiply(a: int, b: int) -> int:
-        """Multiply two integers."""
-        return a * b
-
-    def divide(a: float, b: float) -> float:
-        """Divide two numbers."""
-        return a / b
-
-    def add(a: int, b: int) -> int:
-        """Add two integers."""
-        return a + b
-
-    def subtract(a: int, b: int) -> int:
-        """Subtract two integers."""
-        return a - b
-
     # ── Client — Anthropic with extended thinking ─────────────────────────────
     # claude-sonnet-4-5 natively emits ThinkingPartDelta events, so we get
     # ThinkingStart / ThinkingDelta / ThinkingEnd in the trace stream.
@@ -492,25 +635,24 @@ async def main():
         provider="anthropic",
         model_name="claude-sonnet-4-5",
         enable_thinking=True,
-        thinking_budget=1024,
-        max_tokens=10000,
-        system_prompt=(
-            "You are a precise math tutor. "
-            "Think step-by-step before answering. "
-            "Use the provided tools for every arithmetic operation — "
-            "never compute in your head."
+        thinking_budget=8000,
+        max_tokens=32000,
+        system_prompt=merge_system_prompt(
+            "Use search_web for external facts, evaluate_math for arithmetic, "
+            "execute_python for code (math available; use print). Wait for tool results."
         ),
     )
-    client.add_tool(multiply)
-    client.add_tool(divide)
-    client.add_tool(add)
-    client.add_tool(subtract)
+    client.add_tool(search_web)
+    client.add_tool(execute_python)
+    client.add_tool(evaluate_math)
 
-    # A multi-step question that forces thinking + multiple tool calls
     await client.run(
-        "What is (144 × 12) ÷ 2 + 10 − 5?  "
-        "Show each step and verify the final answer."
+        "When was Python 3.0 first released? Use search_web. "
+        "Then use evaluate_math to compute (42 ** 2 - 100) / 11. "
+        "Then use execute_python to print 2**n for n from 0 through 6, one per line."
+        "when you finish these tasks, think about food that matches today's date and search the web for recipe on how to do it"
     )
 
 
-# asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

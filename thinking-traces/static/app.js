@@ -5,38 +5,172 @@ let ws = null;
 let isRunning = false;
 const tools = [
     {
-        name: 'multiply',
-        code: `def multiply(a: int, b: int) -> int:
-    """Multiply two integers."""
-    return a * b`
+        name: 'search_web',
+        code: `import asyncio
+
+from ddgs import DDGS
+
+
+async def search_web(query: str) -> str:
+    """Search the web via DuckDuckGo text search (titles, href, body)."""
+    await asyncio.sleep(2.0)
+
+    def ddg_text_fetch():
+        search_query = query.strip()
+        with DDGS() as ddgs:
+            rows = ddgs.text(
+                search_query,
+                region="wt-wt",
+                safesearch="moderate",
+                max_results=2,
+            )
+        return list(rows) if rows else []
+
+    try:
+        results = await asyncio.to_thread(ddg_text_fetch)
+    except Exception as exc:
+        return f"Search failed: {type(exc).__name__}: {exc}"
+    if not results:
+        return "No results found; try different keywords."
+    lines = []
+    for idx, row in enumerate(results):
+        title = str(row.get("title", ""))
+        href = str(row.get("href", ""))
+        body = str(row.get("body", ""))
+        lines.append(f"Result {idx + 1}: {title}")
+        lines.append(f"  URL: {href}")
+        lines.append(f"  Body: {body}")
+    return chr(10).join(lines)[:6000]`
     },
     {
-        name: 'divide',
-        code: `def divide(a: float, b: float) -> float:
-    """Divide two numbers."""
-    return a / b`
+        name: 'execute_python',
+        code: `import asyncio
+import io
+import textwrap
+
+
+async def execute_python(code: str) -> str:
+    """Run Python in a restricted environment (math + builtins; use print() for output)."""
+    await asyncio.sleep(2.0)
+    output_buf = io.StringIO()
+
+    def safe_print(*args, **kwargs):
+        kwargs.pop("file", None)
+        print(*args, file=output_buf, **kwargs)
+
+    safe_builtins = {
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "bool": bool,
+        "chr": chr,
+        "dict": dict,
+        "enumerate": enumerate,
+        "filter": filter,
+        "float": float,
+        "format": format,
+        "int": int,
+        "len": len,
+        "list": list,
+        "map": map,
+        "max": max,
+        "min": min,
+        "pow": pow,
+        "print": safe_print,
+        "range": range,
+        "repr": repr,
+        "reversed": reversed,
+        "round": round,
+        "set": set,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+        "tuple": tuple,
+        "zip": zip,
+        "True": True,
+        "False": False,
+        "None": None,
+    }
+    import math
+
+    namespace = {"__builtins__": safe_builtins, "math": math}
+    try:
+        exec(textwrap.dedent(code), namespace, namespace)
+    except Exception as exc:
+        return f"Error: {type(exc).__name__}: {exc}"
+    text_out = output_buf.getvalue().strip()
+    if text_out:
+        return text_out[:8000]
+    return "(no printed output; use print(...) to show results)"`
     },
     {
-        name: 'add',
-        code: `def add(a: int, b: int) -> int:
-    """Add two integers."""
-    return a + b`
-    },
-    {
-        name: 'subtract',
-        code: `def subtract(a: int, b: int) -> int:
-    """Subtract two integers."""
-    return a - b`
+        name: 'evaluate_math',
+        code: `import ast
+import asyncio
+import operator as operator_mod
+
+
+_MATH_BINOPS = {
+    ast.Add: operator_mod.add,
+    ast.Sub: operator_mod.sub,
+    ast.Mult: operator_mod.mul,
+    ast.Div: operator_mod.truediv,
+    ast.FloorDiv: operator_mod.floordiv,
+    ast.Mod: operator_mod.mod,
+    ast.Pow: operator_mod.pow,
+}
+_MATH_UNARY = {
+    ast.UAdd: operator_mod.pos,
+    ast.USub: operator_mod.neg,
+}
+
+
+def _eval_math_ast(node):
+    if isinstance(node, ast.Expression):
+        return _eval_math_ast(node.body)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError("only numeric constants are allowed")
+        return node.value
+    if isinstance(node, ast.UnaryOp):
+        op_t = type(node.op)
+        if op_t not in _MATH_UNARY:
+            raise ValueError("unsupported unary operator")
+        return _MATH_UNARY[op_t](_eval_math_ast(node.operand))
+    if isinstance(node, ast.BinOp):
+        op_t = type(node.op)
+        if op_t not in _MATH_BINOPS:
+            raise ValueError("unsupported binary operator")
+        return _MATH_BINOPS[op_t](_eval_math_ast(node.left), _eval_math_ast(node.right))
+    raise ValueError("unsupported expression (use numbers and + - * / // % ** only)")
+
+
+async def evaluate_math(expression: str) -> str:
+    """Evaluate a single arithmetic expression (numbers, + - * / // % **, parentheses)."""
+    await asyncio.sleep(1.5)
+    expr = expression.strip()
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as exc:
+        return f"Syntax error: {exc}"
+    try:
+        value = _eval_math_ast(tree)
+        return repr(value)
+    except Exception as exc:
+        return f"Error: {type(exc).__name__}: {exc}"`
     },
 ];
 let tokenCount = 0;
-let eventIndex = 0; // global counter for timeline ordering
+let eventIndex = 0;
+let conversation_active = false;
+let active_turn_ctx = null;
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const sidebar = document.getElementById('sidebar');
 const sidebarToggle = document.getElementById('sidebarToggle');
 const mobileSidebarToggle = document.getElementById('mobileSidebarToggle');
-const runBtn = document.getElementById('runBtn');
+const sendBtn = document.getElementById('sendBtn');
+const chatInput = document.getElementById('chat_input');
 const clearBtn = document.getElementById('clearBtn');
 const traceFeed = document.getElementById('traceFeed');
 const emptyState = document.getElementById('emptyState');
@@ -69,9 +203,13 @@ tempSlider.value = 1;
 renderToolChips();
 
 // ── Thinking budget visibility ──────────────────────────────────────────────
-document.getElementById('enable_thinking').addEventListener('change', function () {
-    document.getElementById('thinkingBudgetGroup').style.display = this.checked ? '' : 'none';
-});
+function sync_thinking_budget_visibility() {
+    const en = document.getElementById('enable_thinking');
+    const grp = document.getElementById('thinkingBudgetGroup');
+    if (grp) grp.style.display = en && en.checked ? '' : 'none';
+}
+document.getElementById('enable_thinking').addEventListener('change', sync_thinking_budget_visibility);
+sync_thinking_budget_visibility();
 
 // ── Tools modal ────────────────────────────────────────────────────────────
 addToolBtn.addEventListener('click', openToolModal);
@@ -128,8 +266,16 @@ function shake(el) {
     setTimeout(() => el.style.animation = '', 400);
 }
 
-// ── Clear ──────────────────────────────────────────────────────────────────
-clearBtn.addEventListener('click', () => {
+// ── Clear conversation ─────────────────────────────────────────────────────
+clearBtn.addEventListener('click', clearConversation);
+
+function clearConversation() {
+    conversation_active = false;
+    active_turn_ctx = null;
+    if (ws) {
+        try { ws.close(); } catch { /* ignore */ }
+        ws = null;
+    }
     traceFeed.innerHTML = '';
     traceFeed.appendChild(emptyState);
     emptyState.style.display = 'flex';
@@ -137,150 +283,256 @@ clearBtn.addEventListener('click', () => {
     eventIndex = 0;
     tokenCountEl.textContent = '0 tokens';
     setStatus('idle', 'Idle');
-});
+    if (chatInput) chatInput.focus();
+}
 
-// ── Run ────────────────────────────────────────────────────────────────────
-runBtn.addEventListener('click', startRun);
+function buildChatPayload(user_text) {
+    const max_raw = parseInt(document.getElementById('max_tokens').value, 10);
+    return {
+        provider: document.getElementById('provider').value,
+        model_name: document.getElementById('model_name').value.trim(),
+        system_prompt: document.getElementById('system_prompt').value.trim(),
+        enable_thinking: document.getElementById('enable_thinking').checked,
+        thinking_budget: parseInt(document.getElementById('thinking_budget').value, 10) || 8000,
+        user_prompt: user_text,
+        temperature: (tempVal.textContent === '—') ? null : parseFloat(tempSlider.value),
+        max_tokens: Number.isNaN(max_raw) ? null : max_raw,
+        tools,
+        continue_session: conversation_active,
+    };
+}
 
-function startRun() {
+function appendUserBubble(text) {
+    const row = document.createElement('div');
+    row.className = 'chat-turn chat-turn-user';
+    row.innerHTML = `<div class="chat-bubble chat-bubble-user"><div class="chat-bubble-text">${escHtml(text)}</div></div>`;
+    traceFeed.appendChild(row);
+    scrollFeed();
+}
+
+function createAssistantTurn() {
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-turn chat-turn-assistant';
+    wrap.innerHTML = `
+    <details class="chat-traces">
+      <summary class="chat-traces-summary">
+        <span class="chat-traces-chevron" aria-hidden="true">▸</span>
+        <span>Trace</span>
+        <span class="chat-traces-count" data-trace-count>0 steps</span>
+      </summary>
+      <div class="timeline chat-traces-timeline"></div>
+    </details>
+    <div class="chat-answer">
+      <div class="chat-answer-label">Assistant</div>
+      <div class="chat-answer-body streaming"></div>
+    </div>`;
+    traceFeed.appendChild(wrap);
+    const details_el = wrap.querySelector('.chat-traces');
+    details_el.open = false;
+    details_el.addEventListener('toggle', () => {
+        const ch = wrap.querySelector('.chat-traces-chevron');
+        if (ch) ch.textContent = details_el.open ? '▾' : '▸';
+    });
+    return {
+        wrap,
+        timeline: wrap.querySelector('.chat-traces-timeline'),
+        answerEl: wrap.querySelector('.chat-answer-body'),
+        countEl: wrap.querySelector('[data-trace-count]'),
+        thinkingCards: {},
+        answerRaw: '',
+        traceCount: 0,
+    };
+}
+
+function bumpTraceCount(ctx) {
+    ctx.traceCount += 1;
+    if (ctx.countEl) ctx.countEl.textContent = `${ctx.traceCount} steps`;
+}
+
+/** WebSocket JSON may send null deltas; JS (x + null) becomes the string "null". */
+function wsStringChunk(value) {
+    if (value == null) return '';
+    return typeof value === 'string' ? value : String(value);
+}
+
+function finalizeAssistantAnswer(ctx) {
+    if (!ctx || !ctx.answerEl) return;
+    let raw = wsStringChunk(ctx.answerRaw);
+    if (typeof marked !== 'undefined' && raw) {
+        ctx.answerEl.classList.remove('streaming');
+        ctx.answerEl.classList.add('tc-md');
+        ctx.answerEl.innerHTML = marked.parse(raw);
+    } else if (raw) {
+        ctx.answerEl.textContent = raw;
+    } else {
+        ctx.answerEl.classList.remove('streaming');
+        ctx.answerEl.textContent = '—';
+    }
+}
+
+function ensureWebSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws/trace`);
+    ws.onmessage = handleWsMessage;
+    ws.onerror = () => {
+        if (!active_turn_ctx) return;
+        active_turn_ctx.timeline.appendChild(createErrorCard('WebSocket error — is the server running?'));
+        scrollFeed();
+        setStatus('error', 'Error');
+        conversation_active = false;
+        finishRun();
+    };
+    ws.onclose = () => {
+        ws = null;
+        if (isRunning) {
+            setStatus('idle', 'Idle');
+            finishRun();
+        }
+    };
+}
+
+function handleWsMessage(ev) {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
+    if (msg.type === 'session_reset') return;
+
+    const ctx = active_turn_ctx;
+    const timeline = ctx ? ctx.timeline : null;
+
+    switch (msg.type) {
+        case 'thinking_start':
+            if (!ctx) break;
+            if (!ctx.thinkingCards[msg.part_index]) {
+                const tc = createThinkingCard();
+                ctx.thinkingCards[msg.part_index] = tc;
+                timeline.appendChild(tc);
+                bumpTraceCount(ctx);
+            }
+            scrollFeed();
+            break;
+
+        case 'thinking_delta':
+            if (!ctx) break;
+            if (!ctx.thinkingCards[msg.part_index]) {
+                const tc = createThinkingCard();
+                ctx.thinkingCards[msg.part_index] = tc;
+                timeline.appendChild(tc);
+                bumpTraceCount(ctx);
+            }
+            appendThinking(ctx.thinkingCards[msg.part_index], msg.content);
+            scrollFeed();
+            addTokens(wsStringChunk(msg.content).length / 4);
+            break;
+
+        case 'thinking_end':
+            if (ctx && ctx.thinkingCards[msg.part_index]) {
+                sealThinking(ctx.thinkingCards[msg.part_index]);
+                delete ctx.thinkingCards[msg.part_index];
+            }
+            break;
+
+        case 'tool_call':
+            if (!ctx) break;
+            sealAllThinking(ctx.thinkingCards);
+            ctx.thinkingCards = {};
+            timeline.appendChild(createToolCallCard(msg));
+            bumpTraceCount(ctx);
+            scrollFeed();
+            break;
+
+        case 'tool_result':
+            if (!ctx) break;
+            timeline.appendChild(createToolResultCard(msg));
+            bumpTraceCount(ctx);
+            scrollFeed();
+            break;
+
+        case 'text_delta':
+            if (!ctx) break;
+            sealAllThinking(ctx.thinkingCards);
+            ctx.thinkingCards = {};
+            {
+                const piece = wsStringChunk(msg.content);
+                ctx.answerRaw = (ctx.answerRaw || '') + piece;
+                ctx.answerEl.textContent = ctx.answerRaw;
+                addTokens(piece.length / 4);
+            }
+            scrollFeed();
+            break;
+
+        case 'error':
+            if (ctx && timeline) timeline.appendChild(createErrorCard(wsStringChunk(msg.content)));
+            scrollFeed();
+            setStatus('error', 'Error');
+            conversation_active = false;
+            active_turn_ctx = null;
+            finishRun();
+            break;
+
+        case 'done':
+            if (ctx) {
+                sealAllThinking(ctx.thinkingCards);
+                ctx.thinkingCards = {};
+                finalizeAssistantAnswer(ctx);
+                active_turn_ctx = null;
+            }
+            setStatus('done', 'Done');
+            conversation_active = true;
+            finishRun();
+            break;
+    }
+}
+
+function sendChatMessage() {
     if (isRunning) return;
+    const user_text = (chatInput && chatInput.value || '').trim();
+    if (!user_text) { shake(sendBtn); return; }
 
-    const provider = document.getElementById('provider').value;
-    const model_name = document.getElementById('model_name').value.trim();
-    const system_prompt = document.getElementById('system_prompt').value.trim();
-    const enable_thinking = document.getElementById('enable_thinking').checked;
-    const thinking_budget = parseInt(document.getElementById('thinking_budget').value) || 8000;
-    const user_prompt = document.getElementById('user_prompt').value.trim();
-    const tempRaw = parseFloat(tempSlider.value);
-    const temperature = (tempVal.textContent === '—') ? null : tempRaw;
-    const max_tokens_raw = parseInt(document.getElementById('max_tokens').value);
-    const max_tokens = isNaN(max_tokens_raw) ? null : max_tokens_raw;
+    emptyState.style.display = 'none';
+    appendUserBubble(user_text);
+    chatInput.value = '';
 
-    if (!user_prompt) { shake(runBtn); return; }
+    active_turn_ctx = createAssistantTurn();
 
     setStatus('running', 'Running…');
     isRunning = true;
-    runBtn.disabled = true;
-    eventIndex = 0;
+    sendBtn.disabled = true;
 
-    emptyState.style.display = 'none';
+    const payload = buildChatPayload(user_text);
+    ensureWebSocket();
 
-    // Run header
-    const header = createRunHeader(user_prompt, provider, model_name);
-    traceFeed.appendChild(header);
-
-    // Timeline wrapper
-    const timeline = document.createElement('div');
-    timeline.className = 'timeline';
-    traceFeed.appendChild(timeline);
-    scrollFeed();
-
-    let activeThinkingCards = {}; // keyed by part_index
-    let activeTextCard = null;
-
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws/trace`);
-
-    ws.onopen = () => {
-        ws.send(JSON.stringify({ provider, model_name, system_prompt, enable_thinking, thinking_budget, user_prompt, temperature, max_tokens, tools }));
-    };
-
-    ws.onmessage = (ev) => {
-        let msg;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-
-        switch (msg.type) {
-            case 'thinking_start':
-                // Open a new thinking card for this part_index
-                if (!activeThinkingCards) activeThinkingCards = {};
-                if (!activeThinkingCards[msg.part_index]) {
-                    const tc = createThinkingCard();
-                    activeThinkingCards[msg.part_index] = tc;
-                    timeline.appendChild(tc);
-                }
-                scrollFeed();
-                break;
-
-            case 'thinking_delta':
-                if (!activeThinkingCards) activeThinkingCards = {};
-                if (!activeThinkingCards[msg.part_index]) {
-                    // Defensive: card wasn't opened yet
-                    const tc = createThinkingCard();
-                    activeThinkingCards[msg.part_index] = tc;
-                    timeline.appendChild(tc);
-                }
-                appendThinking(activeThinkingCards[msg.part_index], msg.content);
-                scrollFeed();
-                addTokens(msg.content.length / 4);
-                break;
-
-            case 'thinking_end':
-                if (activeThinkingCards && activeThinkingCards[msg.part_index]) {
-                    sealThinking(activeThinkingCards[msg.part_index]);
-                    delete activeThinkingCards[msg.part_index];
-                }
-                break;
-
-            case 'tool_call':
-                sealAllThinking(activeThinkingCards); activeThinkingCards = {};
-                sealText(activeTextCard); activeTextCard = null;
-                timeline.appendChild(createToolCallCard(msg));
-                scrollFeed();
-                break;
-
-            case 'tool_result':
-                timeline.appendChild(createToolResultCard(msg));
-                scrollFeed();
-                break;
-
-            case 'text_delta':
-                sealAllThinking(activeThinkingCards); activeThinkingCards = {};
-                if (!activeTextCard) {
-                    activeTextCard = createTextCard();
-                    timeline.appendChild(activeTextCard);
-                }
-                appendText(activeTextCard, msg.content);
-                scrollFeed();
-                addTokens(msg.content.length / 4);
-                break;
-
-            case 'final_output':
-                sealAllThinking(activeThinkingCards); activeThinkingCards = {};
-                sealText(activeTextCard); activeTextCard = null;
-                timeline.appendChild(createFinalCard(msg.content));
-                scrollFeed();
-                break;
-
-            case 'error':
-                sealText(activeTextCard); activeTextCard = null;
-                timeline.appendChild(createErrorCard(msg.content));
-                scrollFeed();
-                break;
-
-            case 'done':
-                sealAllThinking(activeThinkingCards); activeThinkingCards = {};
-                sealText(activeTextCard); activeTextCard = null;
-                header.querySelector('.run-status').innerHTML = doneStatus();
-                setStatus('done', 'Done');
-                finishRun();
-                break;
+    const send_payload = () => {
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch {
+            if (active_turn_ctx && active_turn_ctx.timeline) {
+                active_turn_ctx.timeline.appendChild(createErrorCard('Could not send message.'));
+            }
+            conversation_active = false;
+            setStatus('error', 'Error');
+            finishRun();
         }
     };
 
-    ws.onerror = () => {
-        timeline.appendChild(createErrorCard('WebSocket error — is the server running?'));
-        scrollFeed();
-        setStatus('error', 'Error');
-        finishRun();
-    };
-
-    ws.onclose = () => { if (isRunning) finishRun(); };
+    if (ws.readyState === WebSocket.OPEN) send_payload();
+    else ws.addEventListener('open', send_payload, { once: true });
 }
 
 function finishRun() {
     isRunning = false;
-    runBtn.disabled = false;
-    if (ws) { try { ws.close(); } catch { } ws = null; }
+    sendBtn.disabled = false;
+}
+
+sendBtn.addEventListener('click', sendChatMessage);
+if (chatInput) {
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendChatMessage();
+        }
+    });
 }
 
 // ── Status ─────────────────────────────────────────────────────────────────
@@ -305,32 +557,6 @@ function nowStr() {
 // ═══════════════════════════════════════════════════════════════════════════
 // ── Card Builders ──────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════
-
-// ── Run header banner ──────────────────────────────────────────────────────
-function createRunHeader(prompt, provider, model) {
-    const el = document.createElement('div');
-    el.className = 'run-header';
-    el.innerHTML = `
-    <div class="run-header-left">
-      <div class="run-spinner"></div>
-      <div class="run-info">
-        <div class="run-label">Agent run</div>
-        <div class="run-prompt">${escHtml(prompt)}</div>
-      </div>
-    </div>
-    <div class="run-header-right">
-      <span class="run-model-badge">${escHtml(provider)} · ${escHtml(model)}</span>
-      <div class="run-status">
-        <span class="run-status-dot"></span>
-        <span>Running</span>
-      </div>
-    </div>`;
-    return el;
-}
-
-function doneStatus() {
-    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--emerald)" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg> <span style="color:var(--emerald)">Completed</span>`;
-}
 
 // ── Thinking card ──────────────────────────────────────────────────────────
 function createThinkingCard() {
@@ -376,7 +602,7 @@ function createThinkingCard() {
 }
 
 function appendThinking(card, delta) {
-    card._raw += delta;
+    card._raw += wsStringChunk(delta);
     card._textEl.textContent = card._raw;
     // Always keep a short snippet visible in the collapsed header
     card._snipEl.textContent = card._raw.slice(0, 90) + (card._raw.length > 90 ? '…' : '');
@@ -541,42 +767,6 @@ function createToolResultCard(msg) {
           <span class="tc-section-label">Call ID</span>
           <code class="tc-id-code">${escHtml(msg.tool_call_id)}</code>
         </div>
-      </div>
-    </div>`;
-
-    setupCollapse(card);
-    return card;
-}
-
-// ── Final Output card ──────────────────────────────────────────────────────
-function createFinalCard(content) {
-    eventIndex++;
-    const wordCount = content.split(/\s+/).filter(Boolean).length;
-
-    const card = document.createElement('div');
-    card.className = 'tc tc-final';
-    card.dataset.expanded = 'true';
-    card.innerHTML = `
-    <div class="tc-line tc-line-last"></div>
-    <div class="tc-dot tc-dot-final">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-      </svg>
-    </div>
-    <div class="tc-body">
-      <div class="tc-header" role="button" tabindex="0">
-        <div class="tc-header-left">
-          <span class="tc-badge tc-badge-final">Final Output</span>
-          <span class="tc-time">${nowStr()}</span>
-        </div>
-        <div class="tc-header-right">
-          <span class="tc-stats">${wordCount} words</span>
-          <svg class="tc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-      </div>
-      <div class="tc-content">
-        <div class="tc-final-body ${typeof marked !== 'undefined' ? 'tc-md' : ''}">${typeof marked !== 'undefined' ? marked.parse(content) : escHtml(content)
-        }</div>
       </div>
     </div>`;
 

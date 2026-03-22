@@ -5,6 +5,7 @@ Run with:  uv run server.py
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 # ── Import trace types + client ───────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 from test import (
+    DEFAULT_AGENT_SYSTEM_BASE,
     PydanticAIClient,
     ThinkingStart,
     ThinkingDelta,
@@ -25,7 +27,6 @@ from test import (
     TextDelta,
     ToolCallTrace,
     ToolResultTrace,
-    FinalOutput,
 )
 
 app = FastAPI(title="PydanticAI Trace Visualizer")
@@ -33,6 +34,16 @@ app = FastAPI(title="PydanticAI Trace Visualizer")
 static_dir = Path(__file__).parent / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+def build_system_prompt(user_extra: str) -> str:
+    merged = DEFAULT_AGENT_SYSTEM_BASE.strip()
+    extra = (user_extra or "").strip()
+    if extra:
+        merged = f"{merged}\n\n--- Additional instructions ---\n{extra}"
+    if "Today's date:" not in merged:
+        merged += f"\n\nToday's date: {datetime.now().strftime('%A, %B %d, %Y')}."
+    return merged
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -43,47 +54,65 @@ async def root():
 @app.websocket("/ws/trace")
 async def trace_websocket(ws: WebSocket):
     await ws.accept()
+    session_client: PydanticAIClient | None = None
     try:
         while True:
             raw = await ws.receive_text()
             cfg: dict[str, Any] = json.loads(raw)
 
-            provider         = cfg.get("provider", "openai")
-            model_name       = cfg.get("model_name", "gpt-4o")
-            system_prompt    = cfg.get("system_prompt", "You are a helpful assistant.")
-            enable_thinking  = cfg.get("enable_thinking", False)
-            thinking_budget  = int(cfg.get("thinking_budget") or 8000)
-            user_prompt      = cfg.get("user_prompt", "Hello!")
-            temperature      = cfg.get("temperature") or None
-            max_tokens       = cfg.get("max_tokens") or None
-            tools_cfg        = cfg.get("tools", [])
+            if cfg.get("reset_session"):
+                session_client = None
+                await ws.send_text(json.dumps({"type": "session_reset"}))
+                continue
 
-            client = PydanticAIClient(
-                provider=provider,
-                model_name=model_name,
-                system_prompt=system_prompt,
-                enable_thinking=enable_thinking,
-                thinking_budget=thinking_budget,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                keep_history=False,
-            )
+            user_prompt = (cfg.get("user_prompt") or "").strip()
+            if not user_prompt:
+                continue
 
-            # Register user-supplied tools
-            for t in tools_cfg:
-                try:
-                    ns: dict = {}
-                    exec(t["code"], ns)
-                    fn = ns[t["name"]]
-                    client.add_tool(fn, name=t["name"])
-                except Exception as e:
-                    await ws.send_text(json.dumps({
-                        "type": "error",
-                        "content": f"Tool '{t.get('name')}' failed to load: {e}",
-                    }))
+            provider = cfg.get("provider", "openai")
+            model_name = cfg.get("model_name", "gpt-4o")
+            user_extra = (cfg.get("system_prompt") or "").strip()
+            system_prompt = build_system_prompt(user_extra)
+            enable_thinking = cfg.get("enable_thinking", False)
+            thinking_budget = int(cfg.get("thinking_budget") or 8000)
+            temperature_raw = cfg.get("temperature")
+            if temperature_raw is not None and temperature_raw != "":
+                temperature = float(temperature_raw)
+            else:
+                temperature = None
+            max_tokens_raw = cfg.get("max_tokens")
+            max_tokens = int(max_tokens_raw) if max_tokens_raw not in (None, "") else None
+            tools_cfg = cfg.get("tools", [])
+            # Must be JSON boolean true — avoid truthiness of non-empty strings, etc.
+            continue_session = cfg.get("continue_session") is True
 
-            # Stream trace events → JSON messages
-            async for event in client.stream(user_prompt):
+            if not continue_session:
+                session_client = None
+
+            if session_client is None:
+                session_client = PydanticAIClient(
+                    provider=provider,
+                    model_name=model_name,
+                    system_prompt=system_prompt,
+                    enable_thinking=enable_thinking,
+                    thinking_budget=thinking_budget,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    keep_history=True,
+                )
+                for t in tools_cfg:
+                    try:
+                        ns: dict = {}
+                        exec(t["code"], ns)
+                        fn = ns[t["name"]]
+                        session_client.add_tool(fn, name=t["name"])
+                    except Exception as e:
+                        await ws.send_text(json.dumps({
+                            "type": "error",
+                            "content": f"Tool '{t.get('name')}' failed to load: {e}",
+                        }))
+
+            async for event in session_client.stream(user_prompt):
 
                 if isinstance(event, ThinkingStart):
                     await ws.send_text(json.dumps({
@@ -94,7 +123,7 @@ async def trace_websocket(ws: WebSocket):
                 elif isinstance(event, ThinkingDelta):
                     await ws.send_text(json.dumps({
                         "type": "thinking_delta",
-                        "content": event.content,
+                        "content": event.content if event.content is not None else "",
                         "part_index": event.part_index,
                     }))
 
@@ -122,13 +151,7 @@ async def trace_websocket(ws: WebSocket):
                 elif isinstance(event, TextDelta):
                     await ws.send_text(json.dumps({
                         "type": "text_delta",
-                        "content": event.content,
-                    }))
-
-                elif isinstance(event, FinalOutput):
-                    await ws.send_text(json.dumps({
-                        "type": "final_output",
-                        "content": event.content,
+                        "content": event.content if event.content is not None else "",
                     }))
 
             await ws.send_text(json.dumps({"type": "done"}))

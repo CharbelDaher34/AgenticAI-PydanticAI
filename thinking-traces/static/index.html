@@ -4,32 +4,28 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PydanticAI Trace Visualizer</title>
+    <title>Agent chat — traces</title>
     <meta name="description"
-        content="Visualize PydanticAI agent traces in real-time — thinking, tool calls, results, and streaming text." />
+        content="Multi-turn agent chat with collapsible thinking and tool traces." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet" />
-    <!-- Marked.js for markdown rendering -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="/static/style.css" />
 </head>
 
 <body>
 
-    <!-- ── Ambient Background ─────────────────────────────────────────────────── -->
     <div class="ambient-bg">
         <div class="orb orb-1"></div>
         <div class="orb orb-2"></div>
         <div class="orb orb-3"></div>
     </div>
 
-    <!-- ── App Shell ─────────────────────────────────────────────────────────── -->
     <div class="app">
 
-        <!-- Sidebar: Config Panel -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
@@ -44,7 +40,7 @@
                             </linearGradient>
                         </defs>
                     </svg>
-                    <span class="logo-text">Trace<span class="logo-accent">Viz</span></span>
+                    <span class="logo-text">Trace<span class="logo-accent">Chat</span></span>
                 </div>
                 <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -57,7 +53,6 @@
             </div>
 
             <div class="sidebar-body">
-                <!-- Provider -->
                 <div class="form-group">
                     <label for="provider">Provider</label>
                     <div class="select-wrapper">
@@ -67,7 +62,7 @@
                                 <option value="openai-responses">OpenAI Responses (reasoning)</option>
                             </optgroup>
                             <optgroup label="Anthropic">
-                                <option value="anthropic">Anthropic (extended thinking)</option>
+                                <option value="anthropic" selected>Anthropic (extended thinking)</option>
                                 <option value="anthropic-adaptive">Anthropic (adaptive thinking)</option>
                             </optgroup>
                             <optgroup label="Google">
@@ -86,54 +81,41 @@
                     </div>
                 </div>
 
-                <!-- Model Name -->
                 <div class="form-group">
                     <label for="model_name">Model</label>
-                    <input id="model_name" type="text" value="gpt-4o" placeholder="e.g. gpt-4o" />
+                    <input id="model_name" type="text" value="claude-sonnet-4-5" placeholder="e.g. claude-sonnet-4-5" />
                 </div>
 
-                <!-- Thinking toggle -->
                 <div class="form-group toggle-group">
                     <label for="enable_thinking">Enable Thinking</label>
                     <label class="toggle">
-                        <input type="checkbox" id="enable_thinking" />
+                        <input type="checkbox" id="enable_thinking" checked />
                         <span class="track"></span>
                     </label>
                 </div>
 
-                <!-- Thinking Budget (shown only when thinking is on) -->
-                <div class="form-group" id="thinkingBudgetGroup" style="display:none">
+                <div class="form-group" id="thinkingBudgetGroup">
                     <label for="thinking_budget">Thinking budget (tokens)</label>
                     <input id="thinking_budget" type="number" value="8000" min="1024" step="1024" placeholder="8000" />
                 </div>
 
-                <!-- Temperature -->
                 <div class="form-group">
                     <label for="temperature">Temperature <span id="tempVal">—</span></label>
                     <input id="temperature" type="range" min="0" max="2" step="0.05" value="1" />
                 </div>
 
-                <!-- Max Tokens -->
                 <div class="form-group">
                     <label for="max_tokens">Max tokens</label>
-                    <input id="max_tokens" type="number" placeholder="e.g. 2048" min="1" />
+                    <input id="max_tokens" type="number" value="32000" placeholder="e.g. 32000" min="1" />
                 </div>
 
-                <!-- System Prompt -->
                 <div class="form-group">
-                    <label for="system_prompt">System prompt</label>
-                    <textarea id="system_prompt" rows="3"
-                        placeholder="You are a helpful assistant.">You are a precise math tutor. Think step-by-step before answering. Use the provided tools for every arithmetic operation — never compute in your head.</textarea>
+                    <label for="system_prompt">Additional instructions (optional)</label>
+                    <p class="field-hint">Merged after built-in rules. Applies to <strong>new</strong> conversations (after Clear).</p>
+                    <textarea id="system_prompt" rows="4"
+                        placeholder="e.g. Prefer metric units; be formal; focus on security…"></textarea>
                 </div>
 
-                <!-- User Prompt -->
-                <div class="form-group">
-                    <label for="user_prompt">User prompt</label>
-                    <textarea id="user_prompt" rows="4"
-                        placeholder="Enter your question...">What is (144 × 12) ÷ 2 + 10 − 5? Show each step and verify the final answer.</textarea>
-                </div>
-
-                <!-- Tools section -->
                 <div class="form-group tools-section">
                     <div class="tools-header">
                         <label>Tools</label>
@@ -146,19 +128,9 @@
                         </button>
                     </div>
                     <div id="toolsList" class="tools-list">
-                        <!-- tools will be added here -->
                     </div>
                 </div>
 
-                <!-- Run button -->
-                <button class="btn-run" id="runBtn">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M8 5v14l11-7z" />
-                    </svg>
-                    Run Agent
-                </button>
-
-                <!-- Status pill -->
                 <div class="status-row">
                     <div class="status-dot idle" id="statusDot"></div>
                     <span class="status-label" id="statusLabel">Idle</span>
@@ -166,8 +138,7 @@
             </div>
         </aside>
 
-        <!-- Main: Trace Stream -->
-        <main class="main" id="main">
+        <main class="main main-chat" id="main">
             <div class="topbar">
                 <div class="topbar-left">
                     <button class="btn-icon mobile-toggle" id="mobileSidebarToggle">
@@ -178,7 +149,7 @@
                             <line x1="3" y1="18" x2="21" y2="18" />
                         </svg>
                     </button>
-                    <h1 class="page-title">Trace Stream</h1>
+                    <h1 class="page-title">Chat</h1>
                 </div>
                 <div class="topbar-right">
                     <button class="btn-ghost" id="clearBtn">
@@ -189,7 +160,7 @@
                             <path d="M10 11v6" />
                             <path d="M14 11v6" />
                         </svg>
-                        Clear
+                        Clear conversation
                     </button>
                     <div class="token-counter" id="tokenCounter">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -203,36 +174,38 @@
                 </div>
             </div>
 
-            <!-- Legend -->
             <div class="legend">
                 <span class="legend-item thinking-legend"><span class="legend-dot"></span>Thinking</span>
                 <span class="legend-item tool-call-legend"><span class="legend-dot"></span>Tool Call</span>
                 <span class="legend-item tool-result-legend"><span class="legend-dot"></span>Tool Result</span>
-                <span class="legend-item text-legend"><span class="legend-dot"></span>Text</span>
-                <span class="legend-item final-legend"><span class="legend-dot"></span>Final Output</span>
+                <span class="legend-item text-legend"><span class="legend-dot"></span>Answer</span>
             </div>
 
-            <!-- Timeline / Trace Feed -->
-            <div class="trace-feed" id="traceFeed">
-                <!-- Empty state -->
+            <div class="trace-feed chat-feed" id="traceFeed">
                 <div class="empty-state" id="emptyState">
                     <div class="empty-icon">
                         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                            <path d="M2 17l10 5 10-5" />
-                            <path d="M2 12l10 5 10-5" />
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                         </svg>
                     </div>
-                    <h2>No traces yet</h2>
-                    <p>Configure your agent on the left and click <strong>Run Agent</strong> to start streaming traces.
-                    </p>
+                    <h2>Start a conversation</h2>
+                    <p>Type a message below. Thinking and tool steps stay under each reply—expand <strong>Trace</strong> to inspect.</p>
                 </div>
+            </div>
+
+            <div class="chat-composer">
+                <textarea id="chat_input" class="chat-input" rows="4" placeholder="Message…"
+                    spellcheck="true"></textarea>
+                <button type="button" class="btn-run chat-send-btn" id="sendBtn" title="Send (Enter)" aria-label="Send">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
+                    </svg>
+                </button>
             </div>
         </main>
     </div>
 
-    <!-- ── Tool Editor Modal ───────────────────────────────────────────────────── -->
     <div class="modal-overlay" id="toolModal" style="display:none">
         <div class="modal">
             <div class="modal-header">
