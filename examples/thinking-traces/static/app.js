@@ -874,11 +874,7 @@ const providerDefaults = {
     'anthropic':           'claude-sonnet-4-5',
     'anthropic-adaptive':  'claude-opus-4-6',
     'google':              'gemini-2.0-flash',
-    'groq':                'llama-3.3-70b-versatile',
     'xai':                 'grok-3',
-    'openrouter':          'anthropic/claude-3.5-sonnet',
-    'bedrock-anthropic':   'anthropic.claude-3-5-sonnet-20241022-v2:0',
-    'bedrock-openai':      'amazon.nova-pro-v1:0',
 };
 document.getElementById('provider').addEventListener('change', (e) => {
     document.getElementById('model_name').value = providerDefaults[e.target.value] || '';

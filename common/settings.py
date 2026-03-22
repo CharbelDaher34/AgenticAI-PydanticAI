@@ -39,11 +39,6 @@ class Settings(BaseSettings):
         description="Google API key for Gemini models",
     )
     
-    groq_api_key: str | None = Field(
-        default=None,
-        description="Groq API key",
-    )
-    
     # Application settings
     debug: bool = Field(
         default=False,

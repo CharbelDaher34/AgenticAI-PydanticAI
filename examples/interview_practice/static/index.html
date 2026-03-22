@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interview Practice — Adaptive AI Session</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+  <header class="app-header" role="banner">
+    <div class="app-header-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i class="fas fa-layer-group"></i></span>
+        <div class="brand-text">
+          <span class="brand-name">Interview Practice</span>
+          <span class="brand-tagline">Adaptive technical &amp; behavioral sessions</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-wrap" id="main-content">
+    <div class="container">
+
+      <section id="setup-screen" class="setup-screen" aria-labelledby="setup-heading">
+        <div class="setup-intro">
+          <h1 id="setup-heading">Configure your session</h1>
+          <p class="lead">Provide context so the interviewer can tailor questions to the role and your goals.</p>
+        </div>
+
+        <div class="panel setup-card">
+          <form id="setup-form" class="setup-form" autocomplete="off" novalidate>
+            <div class="form-section">
+              <h2 class="form-section-title">Role context</h2>
+              <div class="form-group">
+                <label for="job-desc">Job description</label>
+                <p class="field-hint" id="job-desc-hint">Paste a posting or summarize the position and required skills.</p>
+                <textarea id="job-desc" name="job_description" rows="6"
+                  aria-describedby="job-desc-hint"
+                  placeholder="Example: Senior backend engineer — Python, distributed systems, PostgreSQL, REST APIs, CI/CD…"
+                  required></textarea>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h2 class="form-section-title">Session parameters</h2>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="goal">Focus</label>
+                  <select id="goal" name="goal" required>
+                    <option value="general">General practice</option>
+                    <option value="deep-dive">Deep dive (gaps)</option>
+                    <option value="breadth">Breadth coverage</option>
+                    <option value="behavioral">Behavioral &amp; technical</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="difficulty">Difficulty</label>
+                  <select id="difficulty" name="difficulty" required>
+                    <option value="easy">Easy</option>
+                    <option value="medium" selected>Medium</option>
+                    <option value="hard">Hard</option>
+                    <option value="adaptive">Adaptive</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="num-questions">Questions</label>
+                  <input type="number" id="num-questions" name="num_questions" min="1" max="20" value="5" required>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="start-btn" class="btn btn-primary">
+                <span class="btn-icon"><i class="fas fa-play" aria-hidden="true"></i></span>
+                <span>Begin interview</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section id="interview-screen" class="interview-screen hidden" aria-labelledby="session-heading">
+        <div class="session-bar">
+          <div>
+            <h1 id="session-heading" class="session-title">Live session</h1>
+            <p class="session-meta" id="session-meta"></p>
+          </div>
+        </div>
+
+        <div class="panel chat-shell">
+          <div class="chat-toolbar">
+            <div class="chat-toolbar-left">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span class="chat-toolbar-label">Interviewer</span>
+            </div>
+            <span class="progress-pill" id="progress-label" aria-live="polite">Q 0 / 0</span>
+          </div>
+
+          <div id="chat" class="chat-stream" role="log" aria-relevant="additions" aria-live="polite"></div>
+
+          <div class="typing typing-indicator" id="typing-indicator" aria-hidden="true">
+            <span class="typing-label">Interviewer is preparing a response</span>
+            <div class="typing-dots" aria-hidden="true">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+          </div>
+
+          <div class="composer">
+            <label for="answer-input" class="visually-hidden">Your answer</label>
+            <textarea id="answer-input" rows="1" placeholder="Type your answer. Shift+Enter for a new line." disabled></textarea>
+            <button type="button" id="send-btn" class="btn btn-send" disabled title="Send answer" aria-label="Send answer">
+              <i class="fas fa-arrow-up" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="app-footer" role="contentinfo">
+    <p>Practice session — responses are processed by your configured AI provider.</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

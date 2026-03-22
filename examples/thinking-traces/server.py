@@ -16,9 +16,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-# ── Import trace types + client ───────────────────────────────────────────────
-sys.path.insert(0, str(Path(__file__).parent))
-from test import (
+# ── Import trace types + client (repo root must be on path) ───────────────────
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from common.pydantic_ai_client import (
     DEFAULT_AGENT_SYSTEM_BASE,
     PydanticAIClient,
     ThinkingStart,
