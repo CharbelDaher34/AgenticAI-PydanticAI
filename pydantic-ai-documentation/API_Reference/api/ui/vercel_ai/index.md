@@ -19,14 +19,93 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
 class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, OutputDataT]):
     """UI adapter for the Vercel AI protocol."""
 
+    _: KW_ONLY
+    sdk_version: Literal[5, 6] = 5
+    """Vercel AI SDK version to target. Default is 5 for backwards compatibility.
+
+    Setting `sdk_version=6` enables tool approval streaming for human-in-the-loop workflows.
+    """
+
     @classmethod
     def build_run_input(cls, body: bytes) -> RequestData:
         """Build a Vercel AI run input object from the request body."""
         return request_data_ta.validate_json(body)
 
+    @classmethod
+    async def from_request(
+        cls,
+        request: Request,
+        *,
+        agent: AbstractAgent[AgentDepsT, OutputDataT],
+        sdk_version: Literal[5, 6] = 5,
+        **kwargs: Any,
+    ) -> VercelAIAdapter[AgentDepsT, OutputDataT]:
+        """Extends [`from_request`][pydantic_ai.ui.UIAdapter.from_request] with the `sdk_version` parameter."""
+        return await super().from_request(request, agent=agent, sdk_version=sdk_version, **kwargs)
+
+    @classmethod
+    async def dispatch_request(
+        cls,
+        request: Request,
+        *,
+        agent: AbstractAgent[DispatchDepsT, DispatchOutputDataT],
+        sdk_version: Literal[5, 6] = 5,
+        message_history: Sequence[ModelMessage] | None = None,
+        deferred_tool_results: DeferredToolResults | None = None,
+        model: Model | KnownModelName | str | None = None,
+        instructions: _instructions.AgentInstructions[DispatchDepsT] = None,
+        deps: DispatchDepsT = None,
+        output_type: OutputSpec[Any] | None = None,
+        model_settings: ModelSettings | None = None,
+        usage_limits: UsageLimits | None = None,
+        usage: RunUsage | None = None,
+        metadata: AgentMetadata[DispatchDepsT] | None = None,
+        infer_name: bool = True,
+        toolsets: Sequence[AbstractToolset[DispatchDepsT]] | None = None,
+        builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
+        on_complete: OnCompleteFunc[BaseChunk] | None = None,
+        **kwargs: Any,
+    ) -> Response:
+        """Extends [`dispatch_request`][pydantic_ai.ui.UIAdapter.dispatch_request] with the `sdk_version` parameter."""
+        return await super().dispatch_request(
+            request,
+            agent=agent,
+            sdk_version=sdk_version,
+            message_history=message_history,
+            deferred_tool_results=deferred_tool_results,
+            model=model,
+            instructions=instructions,
+            deps=deps,
+            output_type=output_type,
+            model_settings=model_settings,
+            usage_limits=usage_limits,
+            usage=usage,
+            metadata=metadata,
+            infer_name=infer_name,
+            toolsets=toolsets,
+            builtin_tools=builtin_tools,
+            on_complete=on_complete,
+            **kwargs,
+        )
+
     def build_event_stream(self) -> UIEventStream[RequestData, BaseChunk, AgentDepsT, OutputDataT]:
         """Build a Vercel AI event stream transformer."""
-        return VercelAIEventStream(self.run_input, accept=self.accept)
+        return VercelAIEventStream(self.run_input, accept=self.accept, sdk_version=self.sdk_version)
+
+    @cached_property
+    def deferred_tool_results(self) -> DeferredToolResults | None:
+        """Extract deferred tool results from Vercel AI messages with approval responses."""
+        if self.sdk_version < 6:
+            return None
+        approvals: dict[str, bool | DeferredToolApprovalResult] = {}
+        for tool_call_id, approval in iter_tool_approval_responses(self.run_input.messages):
+            if approval.approved:
+                approvals[tool_call_id] = True
+            elif approval.reason:
+                approvals[tool_call_id] = ToolDenied(message=approval.reason)
+            else:
+                approvals[tool_call_id] = False
+        return DeferredToolResults(approvals=approvals) if approvals else None
 
     @cached_property
     def messages(self) -> list[ModelMessage]:
@@ -54,16 +133,29 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                         try:
                             file = BinaryContent.from_data_uri(part.url)
                         except ValueError:
-                            media_type_prefix = part.media_type.split('/', 1)[0]
-                            match media_type_prefix:
-                                case 'image':
-                                    file = ImageUrl(url=part.url, media_type=part.media_type)
-                                case 'video':
-                                    file = VideoUrl(url=part.url, media_type=part.media_type)
-                                case 'audio':
-                                    file = AudioUrl(url=part.url, media_type=part.media_type)
-                                case _:
-                                    file = DocumentUrl(url=part.url, media_type=part.media_type)
+                            # Check provider_metadata for UploadedFile data
+                            provider_meta = load_provider_metadata(part.provider_metadata)
+                            uploaded_file_id = provider_meta.get('file_id')
+                            uploaded_file_provider = provider_meta.get('provider_name')
+                            if uploaded_file_id and uploaded_file_provider:
+                                file = UploadedFile(
+                                    file_id=uploaded_file_id,
+                                    provider_name=cast(UploadedFileProviderName, uploaded_file_provider),
+                                    media_type=part.media_type,
+                                    vendor_metadata=provider_meta.get('vendor_metadata'),
+                                    identifier=provider_meta.get('identifier'),
+                                )
+                            else:
+                                media_type_prefix = part.media_type.split('/', 1)[0]
+                                match media_type_prefix:
+                                    case 'image':
+                                        file = ImageUrl(url=part.url, media_type=part.media_type)
+                                    case 'video':
+                                        file = VideoUrl(url=part.url, media_type=part.media_type)
+                                    case 'audio':
+                                        file = AudioUrl(url=part.url, media_type=part.media_type)
+                                    case _:
+                                        file = DocumentUrl(url=part.url, media_type=part.media_type)
                         user_prompt_content.append(file)
                     else:  # pragma: no cover
                         raise ValueError(f'Unsupported user message part type: {type(part)}')
@@ -128,8 +220,8 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                         if isinstance(args, str):
                             try:
                                 parsed = json.loads(args)
-                                if isinstance(parsed, dict):
-                                    args = cast(dict[str, Any], parsed)
+                                if _is_str_dict(parsed):
+                                    args = parsed
                             except json.JSONDecodeError:
                                 pass
                         elif isinstance(args, dict) or args is None:
@@ -147,7 +239,9 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                             # The call and return metadata are combined in the output part.
                             # So we extract and return them to the respective parts
                             call_meta = return_meta = {}
-                            has_tool_output = isinstance(part, (ToolOutputAvailablePart, ToolOutputErrorPart))
+                            has_tool_output = isinstance(
+                                part, (ToolOutputAvailablePart, ToolOutputErrorPart, ToolOutputDeniedPart)
+                            )
 
                             if has_tool_output:
                                 call_meta, return_meta = cls._load_builtin_tool_meta(provider_meta)
@@ -164,11 +258,15 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                             )
 
                             if has_tool_output:
-                                output: Any | None = None
-                                if isinstance(part, ToolOutputAvailablePart):
-                                    output = part.output
-                                elif isinstance(part, ToolOutputErrorPart):  # pragma: no branch
-                                    output = {'error_text': part.error_text, 'is_error': True}
+                                if isinstance(part, ToolOutputErrorPart):
+                                    output: Any = part.error_text
+                                    outcome: Literal['success', 'failed', 'denied'] = 'failed'
+                                elif isinstance(part, ToolOutputDeniedPart):
+                                    output = _denial_reason(part)
+                                    outcome = 'denied'
+                                else:
+                                    output = part.output if isinstance(part, ToolOutputAvailablePart) else None
+                                    outcome = 'success'
                                 builder.add(
                                     BuiltinToolReturnPart(
                                         tool_name=tool_name,
@@ -176,6 +274,7 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                                         content=output,
                                         provider_name=return_meta.get('provider_name') or provider_name,
                                         provider_details=return_meta.get('provider_details') or provider_details,
+                                        outcome=outcome,
                                     )
                                 )
                         else:
@@ -196,8 +295,20 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                                 )
                             elif part.state == 'output-error':
                                 builder.add(
-                                    RetryPromptPart(
-                                        tool_name=tool_name, tool_call_id=tool_call_id, content=part.error_text
+                                    ToolReturnPart(
+                                        tool_name=tool_name,
+                                        tool_call_id=tool_call_id,
+                                        content=part.error_text,
+                                        outcome='failed',
+                                    )
+                                )
+                            elif part.state == 'output-denied':
+                                builder.add(
+                                    ToolReturnPart(
+                                        tool_name=tool_name,
+                                        tool_call_id=tool_call_id,
+                                        content=_denial_reason(part),
+                                        outcome='denied',
                                     )
                                 )
                     elif isinstance(part, DataUIPart):  # pragma: no cover
@@ -326,33 +437,44 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                     )
                     combined_provider_meta = cls._dump_builtin_tool_meta(call_meta, return_meta)
 
-                    response_object = builtin_return.model_response_object()
-                    # These `is_error`/`error_text` fields are only present when the BuiltinToolReturnPart
-                    # was parsed from an incoming VercelAI request. We can't detect errors for other sources
-                    # until BuiltinToolReturnPart has standardized error fields (see https://github.com/pydantic/pydantic-ai/issues/3561).3
-                    if response_object.get('is_error') is True and (
-                        (error_text := response_object.get('error_text')) is not None
+                    if builtin_return.outcome == 'denied':
+                        ui_parts.append(
+                            ToolOutputDeniedPart(
+                                type=tool_name,
+                                tool_call_id=part.tool_call_id,
+                                input=part.args_as_dict(),
+                                provider_executed=True,
+                                call_provider_metadata=combined_provider_meta,
+                                approval=ToolApprovalResponded(
+                                    id=str(uuid.uuid4()),
+                                    approved=False,
+                                    reason=builtin_return.model_response_str(),
+                                ),
+                            )
+                        )
+                    elif (
+                        builtin_return.outcome == 'failed'
+                        or builtin_return.model_response_object().get('is_error') is True
                     ):
+                        response_obj = builtin_return.model_response_object()
+                        error_text = response_obj.get('error_text', builtin_return.model_response_str())
                         ui_parts.append(
                             ToolOutputErrorPart(
                                 type=tool_name,
                                 tool_call_id=part.tool_call_id,
-                                input=part.args_as_json_str(),
+                                input=part.args_as_dict(),
                                 error_text=error_text,
-                                state='output-error',
                                 provider_executed=True,
                                 call_provider_metadata=combined_provider_meta,
                             )
                         )
                     else:
-                        content = builtin_return.model_response_str()
                         ui_parts.append(
                             ToolOutputAvailablePart(
                                 type=tool_name,
                                 tool_call_id=part.tool_call_id,
-                                input=part.args_as_json_str(),
-                                output=content,
-                                state='output-available',
+                                input=part.args_as_dict(),
+                                output=tool_return_output(builtin_return),
                                 provider_executed=True,
                                 call_provider_metadata=combined_provider_meta,
                             )
@@ -365,54 +487,91 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                         ToolInputAvailablePart(
                             type=tool_name,
                             tool_call_id=part.tool_call_id,
-                            input=part.args_as_json_str(),
-                            state='input-available',
+                            input=part.args_as_dict(),
                             provider_executed=True,
                             call_provider_metadata=call_provider_metadata,
                         )
                     )
             elif isinstance(part, ToolCallPart):
-                tool_result = tool_results.get(part.tool_call_id)
-                call_provider_metadata = dump_provider_metadata(
-                    id=part.id, provider_name=part.provider_name, provider_details=part.provider_details
-                )
-
-                if isinstance(tool_result, ToolReturnPart):
-                    content = tool_result.model_response_str()
-                    ui_parts.append(
-                        DynamicToolOutputAvailablePart(
-                            tool_name=part.tool_name,
-                            tool_call_id=part.tool_call_id,
-                            input=part.args_as_json_str(),
-                            output=content,
-                            state='output-available',
-                            call_provider_metadata=call_provider_metadata,
-                        )
-                    )
-                elif isinstance(tool_result, RetryPromptPart):
-                    error_text = tool_result.model_response()
-                    ui_parts.append(
-                        DynamicToolOutputErrorPart(
-                            tool_name=part.tool_name,
-                            tool_call_id=part.tool_call_id,
-                            input=part.args_as_json_str(),
-                            error_text=error_text,
-                            state='output-error',
-                            call_provider_metadata=call_provider_metadata,
-                        )
-                    )
-                else:
-                    ui_parts.append(
-                        DynamicToolInputAvailablePart(
-                            tool_name=part.tool_name,
-                            tool_call_id=part.tool_call_id,
-                            input=part.args_as_json_str(),
-                            state='input-available',
-                            call_provider_metadata=call_provider_metadata,
-                        )
-                    )
+                ui_parts.extend(cls._dump_tool_call_part(part, tool_results))
             else:
                 assert_never(part)
+
+        return ui_parts
+
+    @staticmethod
+    def _dump_tool_call_part(
+        part: ToolCallPart, tool_results: dict[str, ToolReturnPart | RetryPromptPart]
+    ) -> list[UIMessagePart]:
+        """Convert a ToolCallPart (with optional result) into UIMessageParts."""
+        tool_result = tool_results.get(part.tool_call_id)
+        call_provider_metadata = dump_provider_metadata(
+            id=part.id, provider_name=part.provider_name, provider_details=part.provider_details
+        )
+        tool_type = f'tool-{part.tool_name}'
+        ui_parts: list[UIMessagePart] = []
+
+        if isinstance(tool_result, ToolReturnPart):
+            if tool_result.outcome == 'denied':
+                ui_parts.append(
+                    ToolOutputDeniedPart(
+                        type=tool_type,
+                        tool_call_id=part.tool_call_id,
+                        input=part.args_as_dict(),
+                        provider_executed=False,
+                        call_provider_metadata=call_provider_metadata,
+                        approval=ToolApprovalResponded(
+                            id=str(uuid.uuid4()),
+                            approved=False,
+                            reason=tool_result.model_response_str(),
+                        ),
+                    )
+                )
+            elif tool_result.outcome == 'failed':
+                ui_parts.append(
+                    ToolOutputErrorPart(
+                        type=tool_type,
+                        tool_call_id=part.tool_call_id,
+                        input=part.args_as_dict(),
+                        error_text=tool_result.model_response_str(),
+                        provider_executed=False,
+                        call_provider_metadata=call_provider_metadata,
+                    )
+                )
+            else:
+                ui_parts.append(
+                    ToolOutputAvailablePart(
+                        type=tool_type,
+                        tool_call_id=part.tool_call_id,
+                        input=part.args_as_dict(),
+                        output=tool_return_output(tool_result),
+                        provider_executed=False,
+                        call_provider_metadata=call_provider_metadata,
+                    )
+                )
+            # Check for Vercel AI chunks returned by tool calls via metadata.
+            ui_parts.extend(_extract_metadata_ui_parts(tool_result))
+        elif isinstance(tool_result, RetryPromptPart):
+            ui_parts.append(
+                ToolOutputErrorPart(
+                    type=tool_type,
+                    tool_call_id=part.tool_call_id,
+                    input=part.args_as_dict(),
+                    error_text=tool_result.model_response(),
+                    provider_executed=False,
+                    call_provider_metadata=call_provider_metadata,
+                )
+            )
+        else:
+            ui_parts.append(
+                ToolInputAvailablePart(
+                    type=tool_type,
+                    tool_call_id=part.tool_call_id,
+                    input=part.args_as_dict(),
+                    provider_executed=False,
+                    call_provider_metadata=call_provider_metadata,
+                )
+            )
 
         return ui_parts
 
@@ -420,11 +579,19 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
     def dump_messages(
         cls,
         messages: Sequence[ModelMessage],
+        *,
+        generate_message_id: Callable[[ModelRequest | ModelResponse, Literal['system', 'user', 'assistant'], int], str]
+        | None = None,
     ) -> list[UIMessage]:
         """Transform Pydantic AI messages into Vercel AI messages.
 
         Args:
             messages: A sequence of ModelMessage objects to convert
+            generate_message_id: Optional custom function to generate message IDs. If provided,
+                it receives the message, the role ('system', 'user', or 'assistant'), and the
+                message index (incremented per UIMessage appended), and should return a unique
+                string ID. If not provided, uses `provider_response_id` for responses,
+                run_id-based IDs for messages with run_id, or a deterministic UUID5 fallback.
 
         Returns:
             A list of UIMessage objects in Vercel AI format
@@ -439,28 +606,49 @@ class VercelAIAdapter(UIAdapter[RequestData, UIMessage, BaseChunk, AgentDepsT, O
                     elif isinstance(part, RetryPromptPart) and part.tool_name:
                         tool_results[part.tool_call_id] = part
 
+        id_generator = generate_message_id or _generate_message_id
         result: list[UIMessage] = []
+        message_index = 0
 
         for msg in messages:
             if isinstance(msg, ModelRequest):
                 system_ui_parts, user_ui_parts = cls._dump_request_message(msg)
                 if system_ui_parts:
-                    result.append(UIMessage(id=str(uuid.uuid4()), role='system', parts=system_ui_parts))
+                    result.append(
+                        UIMessage(id=id_generator(msg, 'system', message_index), role='system', parts=system_ui_parts)
+                    )
+                    message_index += 1
 
                 if user_ui_parts:
-                    result.append(UIMessage(id=str(uuid.uuid4()), role='user', parts=user_ui_parts))
+                    result.append(
+                        UIMessage(id=id_generator(msg, 'user', message_index), role='user', parts=user_ui_parts)
+                    )
+                    message_index += 1
 
             elif isinstance(  # pragma: no branch
                 msg, ModelResponse
             ):
                 ui_parts: list[UIMessagePart] = cls._dump_response_message(msg, tool_results)
                 if ui_parts:  # pragma: no branch
-                    result.append(UIMessage(id=str(uuid.uuid4()), role='assistant', parts=ui_parts))
+                    result.append(
+                        UIMessage(id=id_generator(msg, 'assistant', message_index), role='assistant', parts=ui_parts)
+                    )
+                    message_index += 1
             else:
                 assert_never(msg)
 
         return result
 ```
+
+#### sdk_version
+
+```python
+sdk_version: Literal[5, 6] = 5
+```
+
+Vercel AI SDK version to target. Default is 5 for backwards compatibility.
+
+Setting `sdk_version=6` enables tool approval streaming for human-in-the-loop workflows.
 
 #### build_run_input
 
@@ -477,6 +665,121 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
 def build_run_input(cls, body: bytes) -> RequestData:
     """Build a Vercel AI run input object from the request body."""
     return request_data_ta.validate_json(body)
+```
+
+#### from_request
+
+```python
+from_request(
+    request: Request,
+    *,
+    agent: AbstractAgent[AgentDepsT, OutputDataT],
+    sdk_version: Literal[5, 6] = 5,
+    **kwargs: Any
+) -> VercelAIAdapter[AgentDepsT, OutputDataT]
+```
+
+Extends from_request with the `sdk_version` parameter.
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
+
+```python
+@classmethod
+async def from_request(
+    cls,
+    request: Request,
+    *,
+    agent: AbstractAgent[AgentDepsT, OutputDataT],
+    sdk_version: Literal[5, 6] = 5,
+    **kwargs: Any,
+) -> VercelAIAdapter[AgentDepsT, OutputDataT]:
+    """Extends [`from_request`][pydantic_ai.ui.UIAdapter.from_request] with the `sdk_version` parameter."""
+    return await super().from_request(request, agent=agent, sdk_version=sdk_version, **kwargs)
+```
+
+#### dispatch_request
+
+```python
+dispatch_request(
+    request: Request,
+    *,
+    agent: AbstractAgent[
+        DispatchDepsT, DispatchOutputDataT
+    ],
+    sdk_version: Literal[5, 6] = 5,
+    message_history: Sequence[ModelMessage] | None = None,
+    deferred_tool_results: (
+        DeferredToolResults | None
+    ) = None,
+    model: Model | KnownModelName | str | None = None,
+    instructions: AgentInstructions[DispatchDepsT] = None,
+    deps: DispatchDepsT = None,
+    output_type: OutputSpec[Any] | None = None,
+    model_settings: ModelSettings | None = None,
+    usage_limits: UsageLimits | None = None,
+    usage: RunUsage | None = None,
+    metadata: AgentMetadata[DispatchDepsT] | None = None,
+    infer_name: bool = True,
+    toolsets: (
+        Sequence[AbstractToolset[DispatchDepsT]] | None
+    ) = None,
+    builtin_tools: (
+        Sequence[AbstractBuiltinTool] | None
+    ) = None,
+    on_complete: OnCompleteFunc[BaseChunk] | None = None,
+    **kwargs: Any
+) -> Response
+```
+
+Extends dispatch_request with the `sdk_version` parameter.
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
+
+```python
+@classmethod
+async def dispatch_request(
+    cls,
+    request: Request,
+    *,
+    agent: AbstractAgent[DispatchDepsT, DispatchOutputDataT],
+    sdk_version: Literal[5, 6] = 5,
+    message_history: Sequence[ModelMessage] | None = None,
+    deferred_tool_results: DeferredToolResults | None = None,
+    model: Model | KnownModelName | str | None = None,
+    instructions: _instructions.AgentInstructions[DispatchDepsT] = None,
+    deps: DispatchDepsT = None,
+    output_type: OutputSpec[Any] | None = None,
+    model_settings: ModelSettings | None = None,
+    usage_limits: UsageLimits | None = None,
+    usage: RunUsage | None = None,
+    metadata: AgentMetadata[DispatchDepsT] | None = None,
+    infer_name: bool = True,
+    toolsets: Sequence[AbstractToolset[DispatchDepsT]] | None = None,
+    builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
+    on_complete: OnCompleteFunc[BaseChunk] | None = None,
+    **kwargs: Any,
+) -> Response:
+    """Extends [`dispatch_request`][pydantic_ai.ui.UIAdapter.dispatch_request] with the `sdk_version` parameter."""
+    return await super().dispatch_request(
+        request,
+        agent=agent,
+        sdk_version=sdk_version,
+        message_history=message_history,
+        deferred_tool_results=deferred_tool_results,
+        model=model,
+        instructions=instructions,
+        deps=deps,
+        output_type=output_type,
+        model_settings=model_settings,
+        usage_limits=usage_limits,
+        usage=usage,
+        metadata=metadata,
+        infer_name=infer_name,
+        toolsets=toolsets,
+        builtin_tools=builtin_tools,
+        on_complete=on_complete,
+        **kwargs,
+    )
 ```
 
 #### build_event_stream
@@ -496,8 +799,16 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
 ```python
 def build_event_stream(self) -> UIEventStream[RequestData, BaseChunk, AgentDepsT, OutputDataT]:
     """Build a Vercel AI event stream transformer."""
-    return VercelAIEventStream(self.run_input, accept=self.accept)
+    return VercelAIEventStream(self.run_input, accept=self.accept, sdk_version=self.sdk_version)
 ```
+
+#### deferred_tool_results
+
+```python
+deferred_tool_results: DeferredToolResults | None
+```
+
+Extract deferred tool results from Vercel AI messages with approval responses.
 
 #### messages
 
@@ -541,16 +852,29 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                     try:
                         file = BinaryContent.from_data_uri(part.url)
                     except ValueError:
-                        media_type_prefix = part.media_type.split('/', 1)[0]
-                        match media_type_prefix:
-                            case 'image':
-                                file = ImageUrl(url=part.url, media_type=part.media_type)
-                            case 'video':
-                                file = VideoUrl(url=part.url, media_type=part.media_type)
-                            case 'audio':
-                                file = AudioUrl(url=part.url, media_type=part.media_type)
-                            case _:
-                                file = DocumentUrl(url=part.url, media_type=part.media_type)
+                        # Check provider_metadata for UploadedFile data
+                        provider_meta = load_provider_metadata(part.provider_metadata)
+                        uploaded_file_id = provider_meta.get('file_id')
+                        uploaded_file_provider = provider_meta.get('provider_name')
+                        if uploaded_file_id and uploaded_file_provider:
+                            file = UploadedFile(
+                                file_id=uploaded_file_id,
+                                provider_name=cast(UploadedFileProviderName, uploaded_file_provider),
+                                media_type=part.media_type,
+                                vendor_metadata=provider_meta.get('vendor_metadata'),
+                                identifier=provider_meta.get('identifier'),
+                            )
+                        else:
+                            media_type_prefix = part.media_type.split('/', 1)[0]
+                            match media_type_prefix:
+                                case 'image':
+                                    file = ImageUrl(url=part.url, media_type=part.media_type)
+                                case 'video':
+                                    file = VideoUrl(url=part.url, media_type=part.media_type)
+                                case 'audio':
+                                    file = AudioUrl(url=part.url, media_type=part.media_type)
+                                case _:
+                                    file = DocumentUrl(url=part.url, media_type=part.media_type)
                     user_prompt_content.append(file)
                 else:  # pragma: no cover
                     raise ValueError(f'Unsupported user message part type: {type(part)}')
@@ -615,8 +939,8 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                     if isinstance(args, str):
                         try:
                             parsed = json.loads(args)
-                            if isinstance(parsed, dict):
-                                args = cast(dict[str, Any], parsed)
+                            if _is_str_dict(parsed):
+                                args = parsed
                         except json.JSONDecodeError:
                             pass
                     elif isinstance(args, dict) or args is None:
@@ -634,7 +958,9 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                         # The call and return metadata are combined in the output part.
                         # So we extract and return them to the respective parts
                         call_meta = return_meta = {}
-                        has_tool_output = isinstance(part, (ToolOutputAvailablePart, ToolOutputErrorPart))
+                        has_tool_output = isinstance(
+                            part, (ToolOutputAvailablePart, ToolOutputErrorPart, ToolOutputDeniedPart)
+                        )
 
                         if has_tool_output:
                             call_meta, return_meta = cls._load_builtin_tool_meta(provider_meta)
@@ -651,11 +977,15 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                         )
 
                         if has_tool_output:
-                            output: Any | None = None
-                            if isinstance(part, ToolOutputAvailablePart):
-                                output = part.output
-                            elif isinstance(part, ToolOutputErrorPart):  # pragma: no branch
-                                output = {'error_text': part.error_text, 'is_error': True}
+                            if isinstance(part, ToolOutputErrorPart):
+                                output: Any = part.error_text
+                                outcome: Literal['success', 'failed', 'denied'] = 'failed'
+                            elif isinstance(part, ToolOutputDeniedPart):
+                                output = _denial_reason(part)
+                                outcome = 'denied'
+                            else:
+                                output = part.output if isinstance(part, ToolOutputAvailablePart) else None
+                                outcome = 'success'
                             builder.add(
                                 BuiltinToolReturnPart(
                                     tool_name=tool_name,
@@ -663,6 +993,7 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                                     content=output,
                                     provider_name=return_meta.get('provider_name') or provider_name,
                                     provider_details=return_meta.get('provider_details') or provider_details,
+                                    outcome=outcome,
                                 )
                             )
                     else:
@@ -683,8 +1014,20 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
                             )
                         elif part.state == 'output-error':
                             builder.add(
-                                RetryPromptPart(
-                                    tool_name=tool_name, tool_call_id=tool_call_id, content=part.error_text
+                                ToolReturnPart(
+                                    tool_name=tool_name,
+                                    tool_call_id=tool_call_id,
+                                    content=part.error_text,
+                                    outcome='failed',
+                                )
+                            )
+                        elif part.state == 'output-denied':
+                            builder.add(
+                                ToolReturnPart(
+                                    tool_name=tool_name,
+                                    tool_call_id=tool_call_id,
+                                    content=_denial_reason(part),
+                                    outcome='denied',
                                 )
                             )
                 elif isinstance(part, DataUIPart):  # pragma: no cover
@@ -712,6 +1055,18 @@ def load_messages(cls, messages: Sequence[UIMessage]) -> list[ModelMessage]:  # 
 ```python
 dump_messages(
     messages: Sequence[ModelMessage],
+    *,
+    generate_message_id: (
+        Callable[
+            [
+                ModelRequest | ModelResponse,
+                Literal["system", "user", "assistant"],
+                int,
+            ],
+            str,
+        ]
+        | None
+    ) = None
 ) -> list[UIMessage]
 ```
 
@@ -719,9 +1074,10 @@ Transform Pydantic AI messages into Vercel AI messages.
 
 Parameters:
 
-| Name       | Type                     | Description                                   | Default    |
-| ---------- | ------------------------ | --------------------------------------------- | ---------- |
-| `messages` | `Sequence[ModelMessage]` | A sequence of ModelMessage objects to convert | *required* |
+| Name                  | Type                       | Description                                                         | Default    |
+| --------------------- | -------------------------- | ------------------------------------------------------------------- | ---------- |
+| `messages`            | `Sequence[ModelMessage]`   | A sequence of ModelMessage objects to convert                       | *required* |
+| `generate_message_id` | \`Callable\[\[ModelRequest | ModelResponse, Literal['system', 'user', 'assistant'], int\], str\] | None\`     |
 
 Returns:
 
@@ -736,11 +1092,19 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_adapter.py`
 def dump_messages(
     cls,
     messages: Sequence[ModelMessage],
+    *,
+    generate_message_id: Callable[[ModelRequest | ModelResponse, Literal['system', 'user', 'assistant'], int], str]
+    | None = None,
 ) -> list[UIMessage]:
     """Transform Pydantic AI messages into Vercel AI messages.
 
     Args:
         messages: A sequence of ModelMessage objects to convert
+        generate_message_id: Optional custom function to generate message IDs. If provided,
+            it receives the message, the role ('system', 'user', or 'assistant'), and the
+            message index (incremented per UIMessage appended), and should return a unique
+            string ID. If not provided, uses `provider_response_id` for responses,
+            run_id-based IDs for messages with run_id, or a deterministic UUID5 fallback.
 
     Returns:
         A list of UIMessage objects in Vercel AI format
@@ -755,23 +1119,34 @@ def dump_messages(
                 elif isinstance(part, RetryPromptPart) and part.tool_name:
                     tool_results[part.tool_call_id] = part
 
+    id_generator = generate_message_id or _generate_message_id
     result: list[UIMessage] = []
+    message_index = 0
 
     for msg in messages:
         if isinstance(msg, ModelRequest):
             system_ui_parts, user_ui_parts = cls._dump_request_message(msg)
             if system_ui_parts:
-                result.append(UIMessage(id=str(uuid.uuid4()), role='system', parts=system_ui_parts))
+                result.append(
+                    UIMessage(id=id_generator(msg, 'system', message_index), role='system', parts=system_ui_parts)
+                )
+                message_index += 1
 
             if user_ui_parts:
-                result.append(UIMessage(id=str(uuid.uuid4()), role='user', parts=user_ui_parts))
+                result.append(
+                    UIMessage(id=id_generator(msg, 'user', message_index), role='user', parts=user_ui_parts)
+                )
+                message_index += 1
 
         elif isinstance(  # pragma: no branch
             msg, ModelResponse
         ):
             ui_parts: list[UIMessagePart] = cls._dump_response_message(msg, tool_results)
             if ui_parts:  # pragma: no branch
-                result.append(UIMessage(id=str(uuid.uuid4()), role='assistant', parts=ui_parts))
+                result.append(
+                    UIMessage(id=id_generator(msg, 'assistant', message_index), role='assistant', parts=ui_parts)
+                )
+                message_index += 1
         else:
             assert_never(msg)
 
@@ -791,6 +1166,10 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/_event_stream.py`
 class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, OutputDataT]):
     """UI event stream transformer for the Vercel AI protocol."""
 
+    _: KW_ONLY
+    sdk_version: Literal[5, 6] = 5
+    """Vercel AI SDK version to target. Setting to 6 enables tool approval streaming."""
+
     _step_started: bool = False
     _finish_reason: FinishReason = None
 
@@ -799,7 +1178,7 @@ class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, Outp
         return VERCEL_AI_DSP_HEADERS
 
     def encode_event(self, event: BaseChunk) -> str:
-        return f'data: {event.encode()}\n\n'
+        return f'data: {event.encode(self.sdk_version)}\n\n'
 
     async def before_stream(self) -> AsyncIterator[BaseChunk]:
         yield StartChunk()
@@ -821,6 +1200,16 @@ class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, Outp
         pydantic_reason = event.result.response.finish_reason
         if pydantic_reason:
             self._finish_reason = _FINISH_REASON_MAP.get(pydantic_reason, 'other')
+
+        # Emit tool approval requests for deferred approvals (only when sdk_version >= 6)
+        output = event.result.output
+        if self.sdk_version >= 6 and isinstance(output, DeferredToolRequests):
+            for tool_call in output.approvals:
+                yield ToolApprovalRequestChunk(
+                    approval_id=str(uuid4()),
+                    tool_call_id=tool_call.tool_call_id,
+                )
+            return
         return
         yield
 
@@ -945,11 +1334,16 @@ class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, Outp
         )
 
     async def handle_builtin_tool_return(self, part: BuiltinToolReturnPart) -> AsyncIterator[BaseChunk]:
-        yield ToolOutputAvailableChunk(
-            tool_call_id=part.tool_call_id,
-            output=self._tool_return_output(part),
-            provider_executed=True,
-        )
+        if self.sdk_version >= 6 and part.outcome == 'denied':
+            yield ToolOutputDeniedChunk(tool_call_id=part.tool_call_id)
+        elif part.outcome == 'failed':
+            yield ToolOutputErrorChunk(tool_call_id=part.tool_call_id, error_text=part.model_response_str())
+        else:
+            yield ToolOutputAvailableChunk(
+                tool_call_id=part.tool_call_id,
+                output=_tool_return_with_files(part),
+                provider_executed=True,
+            )
 
     async def handle_file(self, part: FilePart) -> AsyncIterator[BaseChunk]:
         file = part.content
@@ -957,22 +1351,41 @@ class VercelAIEventStream(UIEventStream[RequestData, BaseChunk, AgentDepsT, Outp
 
     async def handle_function_tool_result(self, event: FunctionToolResultEvent) -> AsyncIterator[BaseChunk]:
         part = event.result
-        if isinstance(part, RetryPromptPart):
-            yield ToolOutputErrorChunk(tool_call_id=part.tool_call_id, error_text=part.model_response())
+        tool_call_id = part.tool_call_id
+
+        if self.sdk_version >= 6 and isinstance(part, ToolReturnPart) and part.outcome == 'denied':
+            yield ToolOutputDeniedChunk(tool_call_id=tool_call_id)
+        elif isinstance(part, RetryPromptPart):
+            yield ToolOutputErrorChunk(tool_call_id=tool_call_id, error_text=part.model_response())
+        elif isinstance(part, ToolReturnPart) and part.outcome == 'failed':
+            yield ToolOutputErrorChunk(tool_call_id=tool_call_id, error_text=part.model_response_str())
         else:
-            yield ToolOutputAvailableChunk(tool_call_id=part.tool_call_id, output=self._tool_return_output(part))
+            yield ToolOutputAvailableChunk(tool_call_id=tool_call_id, output=_tool_return_with_files(part))
 
-        # ToolCallResultEvent.content may hold user parts (e.g. text, images) that Vercel AI does not currently have events for
+        # ToolOutputAvailableChunk/ToolOutputErrorChunk.output may hold user parts
+        # (e.g. text, images) that Vercel AI does not currently have chunk types for.
 
-    def _tool_return_output(self, part: BaseToolReturnPart) -> Any:
-        output = part.model_response_object()
-        # Unwrap the return value from the output dictionary if it exists
-        return output.get('return_value', output)
+        # Check for data-carrying Vercel AI chunks returned by tool calls via metadata.
+        # Only data-carrying chunks (DataChunk, SourceUrlChunk, etc.) are yielded;
+        # protocol-control chunks are filtered out by iter_metadata_chunks.
+        if isinstance(part, ToolReturnPart):
+            for chunk in iter_metadata_chunks(part):
+                yield chunk
 ```
+
+#### sdk_version
+
+```python
+sdk_version: Literal[5, 6] = 5
+```
+
+Vercel AI SDK version to target. Setting to 6 enables tool approval streaming.
 
 Vercel AI request types (UI messages).
 
 Converted to Python from: https://github.com/vercel/ai/blob/ai%406.0.57/packages/ai/src/ui/ui-messages.ts
+
+Tool approval types (`ToolApprovalRequested`, `ToolApprovalResponded`) require AI SDK v6 or later.
 
 ### ProviderMetadata
 
@@ -1227,6 +1640,84 @@ class DataUIPart(BaseUIPart):
     data: Any
 ```
 
+### ToolApprovalRequested
+
+Bases: `CamelBaseModel`
+
+Tool approval in requested state (awaiting user response).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class ToolApprovalRequested(CamelBaseModel):
+    """Tool approval in requested state (awaiting user response)."""
+
+    id: str
+    """The approval request ID."""
+```
+
+#### id
+
+```python
+id: str
+```
+
+The approval request ID.
+
+### ToolApprovalResponded
+
+Bases: `CamelBaseModel`
+
+Tool approval in responded state (user has approved or denied).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class ToolApprovalResponded(CamelBaseModel):
+    """Tool approval in responded state (user has approved or denied)."""
+
+    id: str
+    """The approval request ID."""
+
+    approved: bool
+    """Whether the user approved the tool call."""
+
+    reason: str | None = None
+    """Optional reason for the approval or denial."""
+```
+
+#### id
+
+```python
+id: str
+```
+
+The approval request ID.
+
+#### approved
+
+```python
+approved: bool
+```
+
+Whether the user approved the tool call.
+
+#### reason
+
+```python
+reason: str | None = None
+```
+
+Optional reason for the approval or denial.
+
+### ToolApproval
+
+```python
+ToolApproval = ToolApprovalRequested | ToolApprovalResponded
+```
+
+Union of tool approval states.
+
 ### ToolInputStreamingPart
 
 Bases: `BaseUIPart`
@@ -1245,6 +1736,7 @@ class ToolInputStreamingPart(BaseUIPart):
     input: Any | None = None
     provider_executed: bool | None = None
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### ToolInputAvailablePart
@@ -1265,6 +1757,7 @@ class ToolInputAvailablePart(BaseUIPart):
     input: Any | None = None
     provider_executed: bool | None = None
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### ToolOutputAvailablePart
@@ -1287,6 +1780,7 @@ class ToolOutputAvailablePart(BaseUIPart):
     provider_executed: bool | None = None
     call_provider_metadata: ProviderMetadata | None = None
     preliminary: bool | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### ToolOutputErrorPart
@@ -1309,6 +1803,70 @@ class ToolOutputErrorPart(BaseUIPart):
     error_text: str
     provider_executed: bool | None = None
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### ToolApprovalRequestedPart
+
+Bases: `BaseUIPart`
+
+Tool part in approval-requested state (awaiting user decision).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class ToolApprovalRequestedPart(BaseUIPart):
+    """Tool part in approval-requested state (awaiting user decision)."""
+
+    type: Annotated[str, Field(pattern=r'^tool-')]
+    tool_call_id: str
+    state: Literal['approval-requested'] = 'approval-requested'
+    input: Any | None = None
+    provider_executed: bool | None = None
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### ToolApprovalRespondedPart
+
+Bases: `BaseUIPart`
+
+Tool part in approval-responded state (user approved/denied, execution pending).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class ToolApprovalRespondedPart(BaseUIPart):
+    """Tool part in approval-responded state (user approved/denied, execution pending)."""
+
+    type: Annotated[str, Field(pattern=r'^tool-')]
+    tool_call_id: str
+    state: Literal['approval-responded'] = 'approval-responded'
+    input: Any | None = None
+    provider_executed: bool | None = None
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### ToolOutputDeniedPart
+
+Bases: `BaseUIPart`
+
+Tool part in output-denied state (tool was denied, terminal state).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class ToolOutputDeniedPart(BaseUIPart):
+    """Tool part in output-denied state (tool was denied, terminal state)."""
+
+    type: Annotated[str, Field(pattern=r'^tool-')]
+    tool_call_id: str
+    state: Literal['output-denied'] = 'output-denied'
+    input: Any | None = None
+    provider_executed: bool | None = None
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### ToolUIPart
@@ -1319,6 +1877,9 @@ ToolUIPart = (
     | ToolInputAvailablePart
     | ToolOutputAvailablePart
     | ToolOutputErrorPart
+    | ToolApprovalRequestedPart
+    | ToolApprovalRespondedPart
+    | ToolOutputDeniedPart
 )
 ```
 
@@ -1342,6 +1903,7 @@ class DynamicToolInputStreamingPart(BaseUIPart):
     state: Literal['input-streaming'] = 'input-streaming'
     input: Any | None = None
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### DynamicToolInputAvailablePart
@@ -1362,6 +1924,7 @@ class DynamicToolInputAvailablePart(BaseUIPart):
     state: Literal['input-available'] = 'input-available'
     input: Any
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### DynamicToolOutputAvailablePart
@@ -1384,6 +1947,7 @@ class DynamicToolOutputAvailablePart(BaseUIPart):
     output: Any
     call_provider_metadata: ProviderMetadata | None = None
     preliminary: bool | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### DynamicToolOutputErrorPart
@@ -1405,6 +1969,70 @@ class DynamicToolOutputErrorPart(BaseUIPart):
     input: Any
     error_text: str
     call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### DynamicToolApprovalRequestedPart
+
+Bases: `BaseUIPart`
+
+Dynamic tool part in approval-requested state (awaiting user decision).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class DynamicToolApprovalRequestedPart(BaseUIPart):
+    """Dynamic tool part in approval-requested state (awaiting user decision)."""
+
+    type: Literal['dynamic-tool'] = 'dynamic-tool'
+    tool_name: str
+    tool_call_id: str
+    state: Literal['approval-requested'] = 'approval-requested'
+    input: Any
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### DynamicToolApprovalRespondedPart
+
+Bases: `BaseUIPart`
+
+Dynamic tool part in approval-responded state (user approved/denied, execution pending).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class DynamicToolApprovalRespondedPart(BaseUIPart):
+    """Dynamic tool part in approval-responded state (user approved/denied, execution pending)."""
+
+    type: Literal['dynamic-tool'] = 'dynamic-tool'
+    tool_name: str
+    tool_call_id: str
+    state: Literal['approval-responded'] = 'approval-responded'
+    input: Any
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
+```
+
+### DynamicToolOutputDeniedPart
+
+Bases: `BaseUIPart`
+
+Dynamic tool part in output-denied state (tool was denied, terminal state).
+
+Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/request_types.py`
+
+```python
+class DynamicToolOutputDeniedPart(BaseUIPart):
+    """Dynamic tool part in output-denied state (tool was denied, terminal state)."""
+
+    type: Literal['dynamic-tool'] = 'dynamic-tool'
+    tool_name: str
+    tool_call_id: str
+    state: Literal['output-denied'] = 'output-denied'
+    input: Any
+    call_provider_metadata: ProviderMetadata | None = None
+    approval: ToolApproval | None = None
 ```
 
 ### DynamicToolUIPart
@@ -1415,6 +2043,9 @@ DynamicToolUIPart = (
     | DynamicToolInputAvailablePart
     | DynamicToolOutputAvailablePart
     | DynamicToolOutputErrorPart
+    | DynamicToolApprovalRequestedPart
+    | DynamicToolApprovalRespondedPart
+    | DynamicToolOutputDeniedPart
 )
 ```
 
@@ -1551,6 +2182,8 @@ Vercel AI response types (SSE chunks).
 
 Converted to Python from: https://github.com/vercel/ai/blob/ai%406.0.57/packages/ai/src/ui-message-stream/ui-message-chunks.ts
 
+Tool approval types (`ToolApprovalRequestChunk`, `ToolOutputDeniedChunk`) require AI SDK UI v6 or later.
+
 ### ProviderMetadata
 
 ```python
@@ -1589,7 +2222,7 @@ Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/response_types.py`
 class BaseChunk(CamelBaseModel, ABC):
     """Abstract base class for response SSE events."""
 
-    def encode(self) -> str:
+    def encode(self, sdk_version: int) -> str:
         return self.model_dump_json(by_alias=True, exclude_none=True)
 ```
 
@@ -1731,6 +2364,10 @@ class ToolInputStartChunk(BaseChunk):
     provider_executed: bool | None = None
     provider_metadata: ProviderMetadata | None = None
     dynamic: bool | None = None
+
+    def encode(self, sdk_version: int) -> str:
+        exclude = {'provider_metadata'} if sdk_version < 6 else None
+        return self.model_dump_json(by_alias=True, exclude_none=True, exclude=exclude)
 ```
 
 ### ToolInputDeltaChunk
@@ -1838,11 +2475,16 @@ Bases: `BaseChunk`
 
 Tool approval request chunk for human-in-the-loop approval.
 
+Requires AI SDK UI v6 or later.
+
 Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/response_types.py`
 
 ```python
 class ToolApprovalRequestChunk(BaseChunk):
-    """Tool approval request chunk for human-in-the-loop approval."""
+    """Tool approval request chunk for human-in-the-loop approval.
+
+    Requires AI SDK UI v6 or later.
+    """
 
     type: Literal['tool-approval-request'] = 'tool-approval-request'
     approval_id: str
@@ -1855,11 +2497,16 @@ Bases: `BaseChunk`
 
 Tool output denied chunk when user denies tool execution.
 
+Requires AI SDK UI v6 or later.
+
 Source code in `pydantic_ai_slim/pydantic_ai/ui/vercel_ai/response_types.py`
 
 ```python
 class ToolOutputDeniedChunk(BaseChunk):
-    """Tool output denied chunk when user denies tool execution."""
+    """Tool output denied chunk when user denies tool execution.
+
+    Requires AI SDK UI v6 or later.
+    """
 
     type: Literal['tool-output-denied'] = 'tool-output-denied'
     tool_call_id: str
@@ -2049,6 +2696,6 @@ class DoneChunk(BaseChunk):
 
     type: Literal['done'] = 'done'
 
-    def encode(self) -> str:
+    def encode(self, sdk_version: int) -> str:
         return '[DONE]'
 ```

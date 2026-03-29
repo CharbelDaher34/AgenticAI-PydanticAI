@@ -1085,7 +1085,7 @@ from pydantic_ai import Agent
 from pydantic_ai.common_tools.exa import ExaToolset
 
 toolset = ExaToolset(api_key='your-api-key')
-agent = Agent('openai:gpt-4o', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 ```
 
 Source code in `pydantic_ai_slim/pydantic_ai/common_tools/exa.py`
@@ -1103,7 +1103,7 @@ class ExaToolset(FunctionToolset):
     from pydantic_ai.common_tools.exa import ExaToolset
 
     toolset = ExaToolset(api_key='your-api-key')
-    agent = Agent('openai:gpt-4o', toolsets=[toolset])
+    agent = Agent('openai:gpt-5.2', toolsets=[toolset])
     ```
     """
 
@@ -1305,25 +1305,42 @@ class TavilySearchTool:
     client: AsyncTavilyClient
     """The Tavily search client."""
 
+    _: KW_ONLY
+
+    max_results: int | None = None
+    """The maximum number of results. If None, the Tavily default is used."""
+
     async def __call__(
         self,
         query: str,
-        search_deep: Literal['basic', 'advanced'] = 'basic',
-        topic: Literal['general', 'news'] = 'general',
-        time_range: Literal['day', 'week', 'month', 'year', 'd', 'w', 'm', 'y'] | None = None,
+        search_depth: Literal['basic', 'advanced', 'fast', 'ultra-fast'] = 'basic',
+        topic: Literal['general', 'news', 'finance'] = 'general',
+        time_range: Literal['day', 'week', 'month', 'year'] | None = None,
+        include_domains: list[str] | None = None,
+        exclude_domains: list[str] | None = None,
     ) -> list[TavilySearchResult]:
         """Searches Tavily for the given query and returns the results.
 
         Args:
             query: The search query to execute with Tavily.
-            search_deep: The depth of the search.
+            search_depth: The depth of the search.
             topic: The category of the search.
             time_range: The time range back from the current date to filter results.
+            include_domains: List of domains to specifically include in the search results.
+            exclude_domains: List of domains to specifically exclude from the search results.
 
         Returns:
             A list of search results from Tavily.
         """
-        results = await self.client.search(query, search_depth=search_deep, topic=topic, time_range=time_range)  # type: ignore[reportUnknownMemberType]
+        results: dict[str, Any] = await self.client.search(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+            query,
+            search_depth=search_depth,
+            topic=topic,
+            time_range=time_range,  # pyright: ignore[reportArgumentType]
+            max_results=self.max_results,  # pyright: ignore[reportArgumentType]
+            include_domains=include_domains,  # pyright: ignore[reportArgumentType]
+            exclude_domains=exclude_domains,  # pyright: ignore[reportArgumentType]
+        )
         return tavily_search_ta.validate_python(results['results'])
 ```
 
@@ -1335,26 +1352,30 @@ client: AsyncTavilyClient
 
 The Tavily search client.
 
+#### max_results
+
+```python
+max_results: int | None = None
+```
+
+The maximum number of results. If None, the Tavily default is used.
+
 #### __call__
 
 ```python
 __call__(
     query: str,
-    search_deep: Literal["basic", "advanced"] = "basic",
-    topic: Literal["general", "news"] = "general",
+    search_depth: Literal[
+        "basic", "advanced", "fast", "ultra-fast"
+    ] = "basic",
+    topic: Literal[
+        "general", "news", "finance"
+    ] = "general",
     time_range: (
-        Literal[
-            "day",
-            "week",
-            "month",
-            "year",
-            "d",
-            "w",
-            "m",
-            "y",
-        ]
-        | None
+        Literal["day", "week", "month", "year"] | None
     ) = None,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
 ) -> list[TavilySearchResult]
 ```
 
@@ -1362,12 +1383,14 @@ Searches Tavily for the given query and returns the results.
 
 Parameters:
 
-| Name          | Type                                                          | Description                              | Default                                                      |
-| ------------- | ------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------ |
-| `query`       | `str`                                                         | The search query to execute with Tavily. | *required*                                                   |
-| `search_deep` | `Literal['basic', 'advanced']`                                | The depth of the search.                 | `'basic'`                                                    |
-| `topic`       | `Literal['general', 'news']`                                  | The category of the search.              | `'general'`                                                  |
-| `time_range`  | \`Literal['day', 'week', 'month', 'year', 'd', 'w', 'm', 'y'] | None\`                                   | The time range back from the current date to filter results. |
+| Name              | Type                                                 | Description                              | Default                                                          |
+| ----------------- | ---------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------- |
+| `query`           | `str`                                                | The search query to execute with Tavily. | *required*                                                       |
+| `search_depth`    | `Literal['basic', 'advanced', 'fast', 'ultra-fast']` | The depth of the search.                 | `'basic'`                                                        |
+| `topic`           | `Literal['general', 'news', 'finance']`              | The category of the search.              | `'general'`                                                      |
+| `time_range`      | \`Literal['day', 'week', 'month', 'year']            | None\`                                   | The time range back from the current date to filter results.     |
+| `include_domains` | \`list[str]                                          | None\`                                   | List of domains to specifically include in the search results.   |
+| `exclude_domains` | \`list[str]                                          | None\`                                   | List of domains to specifically exclude from the search results. |
 
 Returns:
 
@@ -1381,52 +1404,173 @@ Source code in `pydantic_ai_slim/pydantic_ai/common_tools/tavily.py`
 async def __call__(
     self,
     query: str,
-    search_deep: Literal['basic', 'advanced'] = 'basic',
-    topic: Literal['general', 'news'] = 'general',
-    time_range: Literal['day', 'week', 'month', 'year', 'd', 'w', 'm', 'y'] | None = None,
+    search_depth: Literal['basic', 'advanced', 'fast', 'ultra-fast'] = 'basic',
+    topic: Literal['general', 'news', 'finance'] = 'general',
+    time_range: Literal['day', 'week', 'month', 'year'] | None = None,
+    include_domains: list[str] | None = None,
+    exclude_domains: list[str] | None = None,
 ) -> list[TavilySearchResult]:
     """Searches Tavily for the given query and returns the results.
 
     Args:
         query: The search query to execute with Tavily.
-        search_deep: The depth of the search.
+        search_depth: The depth of the search.
         topic: The category of the search.
         time_range: The time range back from the current date to filter results.
+        include_domains: List of domains to specifically include in the search results.
+        exclude_domains: List of domains to specifically exclude from the search results.
 
     Returns:
         A list of search results from Tavily.
     """
-    results = await self.client.search(query, search_depth=search_deep, topic=topic, time_range=time_range)  # type: ignore[reportUnknownMemberType]
+    results: dict[str, Any] = await self.client.search(  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        query,
+        search_depth=search_depth,
+        topic=topic,
+        time_range=time_range,  # pyright: ignore[reportArgumentType]
+        max_results=self.max_results,  # pyright: ignore[reportArgumentType]
+        include_domains=include_domains,  # pyright: ignore[reportArgumentType]
+        exclude_domains=exclude_domains,  # pyright: ignore[reportArgumentType]
+    )
     return tavily_search_ta.validate_python(results['results'])
 ```
 
 ### tavily_search_tool
 
 ```python
-tavily_search_tool(api_key: str)
+tavily_search_tool(
+    api_key: str,
+    *,
+    max_results: int | None = None,
+    search_depth: Literal[
+        "basic", "advanced", "fast", "ultra-fast"
+    ] = _UNSET,
+    topic: Literal["general", "news", "finance"] = _UNSET,
+    time_range: (
+        Literal["day", "week", "month", "year"] | None
+    ) = _UNSET,
+    include_domains: list[str] | None = _UNSET,
+    exclude_domains: list[str] | None = _UNSET
+) -> Tool[Any]
+```
+
+```python
+tavily_search_tool(
+    *,
+    client: AsyncTavilyClient,
+    max_results: int | None = None,
+    search_depth: Literal[
+        "basic", "advanced", "fast", "ultra-fast"
+    ] = _UNSET,
+    topic: Literal["general", "news", "finance"] = _UNSET,
+    time_range: (
+        Literal["day", "week", "month", "year"] | None
+    ) = _UNSET,
+    include_domains: list[str] | None = _UNSET,
+    exclude_domains: list[str] | None = _UNSET
+) -> Tool[Any]
+```
+
+```python
+tavily_search_tool(
+    api_key: str | None = None,
+    *,
+    client: AsyncTavilyClient | None = None,
+    max_results: int | None = None,
+    search_depth: Literal[
+        "basic", "advanced", "fast", "ultra-fast"
+    ] = _UNSET,
+    topic: Literal["general", "news", "finance"] = _UNSET,
+    time_range: (
+        Literal["day", "week", "month", "year"] | None
+    ) = _UNSET,
+    include_domains: list[str] | None = _UNSET,
+    exclude_domains: list[str] | None = _UNSET
+) -> Tool[Any]
 ```
 
 Creates a Tavily search tool.
 
+`max_results` is always developer-controlled and does not appear in the LLM tool schema. Other parameters, when provided, are fixed for all searches and hidden from the LLM's tool schema. Parameters left unset remain available for the LLM to set per-call.
+
 Parameters:
 
-| Name      | Type  | Description                                                                       | Default    |
-| --------- | ----- | --------------------------------------------------------------------------------- | ---------- |
-| `api_key` | `str` | The Tavily API key. You can get one by signing up at https://app.tavily.com/home. | *required* |
+| Name              | Type                                                 | Description                 | Default                                                                                                                             |
+| ----------------- | ---------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `api_key`         | \`str                                                | None\`                      | The Tavily API key. Required if client is not provided. You can get one by signing up at https://app.tavily.com/home.               |
+| `client`          | \`AsyncTavilyClient                                  | None\`                      | An existing AsyncTavilyClient. If provided, api_key is ignored. This is useful for sharing a client across multiple tool instances. |
+| `max_results`     | \`int                                                | None\`                      | The maximum number of results. If None, the Tavily default is used.                                                                 |
+| `search_depth`    | `Literal['basic', 'advanced', 'fast', 'ultra-fast']` | The depth of the search.    | `_UNSET`                                                                                                                            |
+| `topic`           | `Literal['general', 'news', 'finance']`              | The category of the search. | `_UNSET`                                                                                                                            |
+| `time_range`      | \`Literal['day', 'week', 'month', 'year']            | None\`                      | The time range back from the current date to filter results.                                                                        |
+| `include_domains` | \`list[str]                                          | None\`                      | List of domains to specifically include in the search results.                                                                      |
+| `exclude_domains` | \`list[str]                                          | None\`                      | List of domains to specifically exclude from the search results.                                                                    |
 
 Source code in `pydantic_ai_slim/pydantic_ai/common_tools/tavily.py`
 
 ```python
-def tavily_search_tool(api_key: str):
+def tavily_search_tool(
+    api_key: str | None = None,
+    *,
+    client: AsyncTavilyClient | None = None,
+    max_results: int | None = None,
+    search_depth: Literal['basic', 'advanced', 'fast', 'ultra-fast'] = _UNSET,
+    topic: Literal['general', 'news', 'finance'] = _UNSET,
+    time_range: Literal['day', 'week', 'month', 'year'] | None = _UNSET,
+    include_domains: list[str] | None = _UNSET,
+    exclude_domains: list[str] | None = _UNSET,
+) -> Tool[Any]:
     """Creates a Tavily search tool.
 
+    `max_results` is always developer-controlled and does not appear in the LLM tool schema.
+    Other parameters, when provided, are fixed for all searches and hidden from the LLM's
+    tool schema. Parameters left unset remain available for the LLM to set per-call.
+
     Args:
-        api_key: The Tavily API key.
+        api_key: The Tavily API key. Required if `client` is not provided.
 
             You can get one by signing up at [https://app.tavily.com/home](https://app.tavily.com/home).
+        client: An existing AsyncTavilyClient. If provided, `api_key` is ignored.
+            This is useful for sharing a client across multiple tool instances.
+        max_results: The maximum number of results. If None, the Tavily default is used.
+        search_depth: The depth of the search.
+        topic: The category of the search.
+        time_range: The time range back from the current date to filter results.
+        include_domains: List of domains to specifically include in the search results.
+        exclude_domains: List of domains to specifically exclude from the search results.
     """
+    if client is None:
+        if api_key is None:
+            raise ValueError('Either api_key or client must be provided')
+        client = AsyncTavilyClient(api_key)
+    func = TavilySearchTool(client=client, max_results=max_results).__call__
+
+    kwargs: dict[str, Any] = {}
+    if search_depth is not _UNSET:
+        kwargs['search_depth'] = search_depth
+    if topic is not _UNSET:
+        kwargs['topic'] = topic
+    if time_range is not _UNSET:
+        kwargs['time_range'] = time_range
+    if include_domains is not _UNSET:
+        kwargs['include_domains'] = include_domains
+    if exclude_domains is not _UNSET:
+        kwargs['exclude_domains'] = exclude_domains
+
+    if kwargs:
+        original = func
+        func = partial(func, **kwargs)
+        func.__name__ = original.__name__  # type: ignore[union-attr]
+        func.__qualname__ = original.__qualname__
+        # partial with keyword args only updates defaults, not removes params.
+        # Set __signature__ explicitly to exclude bound params from the tool schema.
+        orig_sig = signature(original)
+        func.__signature__ = orig_sig.replace(  # type: ignore[attr-defined]
+            parameters=[p for name, p in orig_sig.parameters.items() if name not in kwargs]
+        )
+
     return Tool[Any](
-        TavilySearchTool(client=AsyncTavilyClient(api_key)).__call__,
+        func,  # pyright: ignore[reportArgumentType]
         name='tavily_search',
         description='Searches Tavily for the given query and returns the results.',
     )

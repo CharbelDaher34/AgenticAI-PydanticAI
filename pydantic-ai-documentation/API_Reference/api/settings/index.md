@@ -173,7 +173,33 @@ class ModelSettings(TypedDict, total=False):
 
     * OpenAI
     * Anthropic
+    * Gemini
     * Groq
+    * xAI
+    """
+
+    thinking: ThinkingLevel
+    """Enable or configure thinking/reasoning for the model.
+
+    - `True`: Enable thinking with the provider's default effort level.
+    - `False`: Disable thinking (silently ignored if the model always thinks).
+    - `'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`: Enable thinking at a specific effort level.
+
+    When omitted, the model uses its default behavior (which may include thinking
+    for reasoning models).
+
+    Provider-specific thinking settings (e.g., `anthropic_thinking`,
+    `openai_reasoning_effort`) take precedence over this unified field.
+
+    Supported by:
+
+    * Anthropic
+    * OpenAI
+    * Gemini
+    * Groq
+    * Bedrock
+    * OpenRouter
+    * Cerebras
     * xAI
     """
 
@@ -388,7 +414,35 @@ Supported by:
 
 - OpenAI
 - Anthropic
+- Gemini
 - Groq
+- xAI
+
+#### thinking
+
+```python
+thinking: ThinkingLevel
+```
+
+Enable or configure thinking/reasoning for the model.
+
+- `True`: Enable thinking with the provider's default effort level.
+- `False`: Disable thinking (silently ignored if the model always thinks).
+- `'minimal'`/`'low'`/`'medium'`/`'high'`/`'xhigh'`: Enable thinking at a specific effort level.
+
+When omitted, the model uses its default behavior (which may include thinking for reasoning models).
+
+Provider-specific thinking settings (e.g., `anthropic_thinking`, `openai_reasoning_effort`) take precedence over this unified field.
+
+Supported by:
+
+- Anthropic
+- OpenAI
+- Gemini
+- Groq
+- Bedrock
+- OpenRouter
+- Cerebras
 - xAI
 
 #### extra_body

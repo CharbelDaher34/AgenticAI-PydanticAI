@@ -250,7 +250,7 @@ class OpenRouterReasoning(TypedDict, total=False):
     token limits, but not both simultaneously.
     """
 
-    effort: Literal['high', 'medium', 'low']
+    effort: Literal['xhigh', 'high', 'medium', 'low', 'minimal', 'none']
     """OpenAI-style reasoning effort level. Cannot be used with max_tokens."""
 
     max_tokens: int
@@ -266,7 +266,9 @@ class OpenRouterReasoning(TypedDict, total=False):
 #### effort
 
 ```python
-effort: Literal['high', 'medium', 'low']
+effort: Literal[
+    "xhigh", "high", "medium", "low", "minimal", "none"
+]
 ```
 
 OpenAI-style reasoning effort level. Cannot be used with max_tokens.
@@ -449,6 +451,15 @@ class OpenRouterModel(OpenAIChatModel):
         """
         super().__init__(model_name, provider=provider or OpenRouterProvider(), profile=profile, settings=settings)
 
+    @classmethod
+    @override
+    def supported_builtin_tools(cls) -> frozenset[type[AbstractBuiltinTool]]:
+        """Return the set of builtin tool types this model can handle.
+
+        OpenRouter supports web search via its plugins system.
+        """
+        return frozenset({WebSearchTool})
+
     @override
     def prepare_request(
         self,
@@ -456,8 +467,30 @@ class OpenRouterModel(OpenAIChatModel):
         model_request_parameters: ModelRequestParameters,
     ) -> tuple[ModelSettings | None, ModelRequestParameters]:
         merged_settings, customized_parameters = super().prepare_request(model_settings, model_request_parameters)
-        new_settings = _openrouter_settings_to_openai_settings(cast(OpenRouterModelSettings, merged_settings or {}))
+        new_settings = _openrouter_settings_to_openai_settings(
+            cast(OpenRouterModelSettings, merged_settings or {}), customized_parameters
+        )
         return new_settings, customized_parameters
+
+    @override
+    def _get_reasoning_effort(
+        self,
+        model_settings: OpenAIChatModelSettings,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ReasoningEffort | Any:
+        """OpenRouter handles reasoning via extra_body['reasoning'], not the reasoning_effort parameter.
+
+        Only pass through explicit openai_reasoning_effort if set; unified thinking
+        is handled in _openrouter_settings_to_openai_settings via extra_body['reasoning'].
+        """
+        if effort := model_settings.get('openai_reasoning_effort'):
+            return effort
+        return omit
+
+    @override
+    def _get_web_search_options(self, model_request_parameters: ModelRequestParameters) -> WebSearchOptions | None:
+        """OpenRouter handles web search via plugins in extra_body, not via the OpenAI web_search_options parameter."""
+        return None
 
     @override
     def _validate_completion(self, response: chat.ChatCompletion) -> _OpenRouterChatCompletion:
@@ -508,6 +541,32 @@ class OpenRouterModel(OpenAIChatModel):
     @override
     def _streamed_response_cls(self):
         return OpenRouterStreamedResponse
+
+    @override
+    async def _map_binary_content_item(self, item: BinaryContent) -> ChatCompletionContentPartParam:
+        """Map a BinaryContent item to a chat completion content part for OpenRouter."""
+        if item.is_video:
+            video_url: _VideoURL = {'url': item.data_uri}
+            return cast(
+                ChatCompletionContentPartParam,
+                _ChatCompletionContentPartVideoUrlParam(video_url=video_url, type='video_url'),
+            )
+
+        return await super()._map_binary_content_item(item)
+
+    @override
+    async def _map_video_url_item(self, item: VideoUrl) -> ChatCompletionContentPartParam:
+        """Map a VideoUrl to a chat completion content part for OpenRouter."""
+        video_url: _VideoURL = {'url': item.url}
+        if item.force_download:
+            video_content = await download_item(item, data_format='base64_uri', type_format='extension')
+            video_url['url'] = video_content['data']
+        # OpenRouter extends OpenAI's API to support video_url, but it's not in the OpenAI client types.
+        # At runtime, the OpenAI client accepts dicts that match the expected structure.
+        return cast(
+            ChatCompletionContentPartParam,
+            _ChatCompletionContentPartVideoUrlParam(video_url=video_url, type='video_url'),
+        )
 
     @override
     def _map_finish_reason(  # type: ignore[reportIncompatibleMethodOverride]
@@ -561,6 +620,31 @@ def __init__(
         settings: Model-specific settings that will be used as defaults for this model.
     """
     super().__init__(model_name, provider=provider or OpenRouterProvider(), profile=profile, settings=settings)
+```
+
+#### supported_builtin_tools
+
+```python
+supported_builtin_tools() -> (
+    frozenset[type[AbstractBuiltinTool]]
+)
+```
+
+Return the set of builtin tool types this model can handle.
+
+OpenRouter supports web search via its plugins system.
+
+Source code in `pydantic_ai_slim/pydantic_ai/models/openrouter.py`
+
+```python
+@classmethod
+@override
+def supported_builtin_tools(cls) -> frozenset[type[AbstractBuiltinTool]]:
+    """Return the set of builtin tool types this model can handle.
+
+    OpenRouter supports web search via its plugins system.
+    """
+    return frozenset({WebSearchTool})
 ```
 
 ### OpenRouterStreamedResponse

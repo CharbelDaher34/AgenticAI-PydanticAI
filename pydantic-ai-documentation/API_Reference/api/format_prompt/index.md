@@ -17,7 +17,7 @@ Format a Python object as XML.
 
 This is useful since LLMs often find it easier to read semi-structured data (e.g. examples) as XML, rather than JSON etc.
 
-Supports: `str`, `bytes`, `bytearray`, `bool`, `int`, `float`, `date`, `datetime`, `time`, `timedelta`, `Enum`, `Mapping`, `Iterable`, `dataclass`, and `BaseModel`.
+Supports: `str`, `bytes`, `bytearray`, `bool`, `int`, `float`, `Decimal`, `date`, `datetime`, `time`, `timedelta`, `UUID`, `Enum`, `Mapping`, `Iterable`, `dataclass`, and `BaseModel`.
 
 Parameters:
 
@@ -69,8 +69,8 @@ def format_as_xml(
     This is useful since LLMs often find it easier to read semi-structured data (e.g. examples) as XML,
     rather than JSON etc.
 
-    Supports: `str`, `bytes`, `bytearray`, `bool`, `int`, `float`, `date`, `datetime`, `time`, `timedelta`, `Enum`,
-    `Mapping`, `Iterable`, `dataclass`, and `BaseModel`.
+    Supports: `str`, `bytes`, `bytearray`, `bool`, `int`, `float`, `Decimal`, `date`, `datetime`, `time`, `timedelta`,
+    `UUID`, `Enum`, `Mapping`, `Iterable`, `dataclass`, and `BaseModel`.
 
     Args:
         obj: Python Object to serialize to XML.

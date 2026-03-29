@@ -35,6 +35,7 @@ Unlike unit tests, evals are an emerging art/science. Anyone who claims to know 
 - [Concurrency & Performance](https://ai.pydantic.dev/evals/how-to/concurrency/index.md) - Control parallel execution
 - [Retry Strategies](https://ai.pydantic.dev/evals/how-to/retry-strategies/index.md) - Handle transient failures
 - [Metrics & Attributes](https://ai.pydantic.dev/evals/how-to/metrics-attributes/index.md) - Track custom data
+- [Case Lifecycle Hooks](https://ai.pydantic.dev/evals/how-to/lifecycle/index.md) - Per-case setup, teardown, and context enrichment
 
 **Examples:**
 

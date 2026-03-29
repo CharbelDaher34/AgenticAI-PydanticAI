@@ -21,14 +21,14 @@ uv run -m pydantic_ai_examples.pydantic_model
 This examples uses `openai:gpt-5` by default, but it works well with other models, e.g. you can run it with Gemini using:
 
 ```bash
-PYDANTIC_AI_MODEL=gemini-2.5-pro python -m pydantic_ai_examples.pydantic_model
+PYDANTIC_AI_MODEL=gemini-3-pro-preview python -m pydantic_ai_examples.pydantic_model
 ```
 
 ```bash
-PYDANTIC_AI_MODEL=gemini-2.5-pro uv run -m pydantic_ai_examples.pydantic_model
+PYDANTIC_AI_MODEL=gemini-3-pro-preview uv run -m pydantic_ai_examples.pydantic_model
 ```
 
-(or `PYDANTIC_AI_MODEL=gemini-2.5-flash ...`)
+(or `PYDANTIC_AI_MODEL=gemini-3-flash-preview ...`)
 
 ## Example Code
 
@@ -59,7 +59,7 @@ class MyModel(BaseModel):
     country: str
 
 
-model = os.getenv('PYDANTIC_AI_MODEL', 'openai:gpt-5')
+model = os.getenv('PYDANTIC_AI_MODEL', 'openai:gpt-5.2')
 print(f'Using model: {model}')
 agent = Agent(model, output_type=MyModel)
 

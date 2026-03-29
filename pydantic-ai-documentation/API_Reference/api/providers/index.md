@@ -43,7 +43,8 @@ class Provider(ABC, Generic[InterfaceClient]):
         """The client for the provider."""
         raise NotImplementedError()
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         """The model profile for the named model, if available."""
         return None  # pragma: no cover
 
@@ -86,7 +87,8 @@ The model profile for the named model, if available.
 Source code in `pydantic_ai_slim/pydantic_ai/providers/__init__.py`
 
 ```python
-def model_profile(self, model_name: str) -> ModelProfile | None:
+@staticmethod
+def model_profile(model_name: str) -> ModelProfile | None:
     """The model profile for the named model, if available."""
     return None  # pragma: no cover
 ```
@@ -136,7 +138,9 @@ def gateway_provider(
             ' to use the Pydantic AI Gateway provider.'
         )
 
-    base_url = base_url or os.getenv('PYDANTIC_AI_GATEWAY_BASE_URL', os.getenv('PAIG_BASE_URL', GATEWAY_BASE_URL))
+    base_url = (
+        base_url or os.getenv('PYDANTIC_AI_GATEWAY_BASE_URL', os.getenv('PAIG_BASE_URL')) or _infer_base_url(api_key)
+    )
     http_client = http_client or cached_async_http_client(provider=f'gateway/{upstream_provider}')
     http_client.event_hooks = {'request': [_request_hook(api_key)]}
 
@@ -200,9 +204,10 @@ class AnthropicProvider(Provider[AsyncAnthropicClient]):
     def client(self) -> AsyncAnthropicClient:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         profile = anthropic_model_profile(model_name)
-        return ModelProfile(json_schema_transformer=AnthropicJsonSchemaTransformer).update(profile)
+        return AnthropicModelProfile(json_schema_transformer=AnthropicJsonSchemaTransformer).update(profile)
 
     @overload
     def __init__(self, *, anthropic_client: AsyncAnthropicClient | None = None) -> None: ...
@@ -357,7 +362,8 @@ class GoogleProvider(Provider[Client]):
     def client(self) -> Client:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         return google_model_profile(model_name)
 
     @overload
@@ -695,7 +701,8 @@ class OpenAIProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         return openai_model_profile(model_name)
 
     @overload
@@ -842,9 +849,12 @@ class XaiProvider(Provider[AsyncClient]):
 
     @property
     def client(self) -> AsyncClient:
+        if self._lazy_client is not None:
+            return self._lazy_client.get_client()
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         return grok_model_profile(model_name)
 
     @overload
@@ -869,6 +879,7 @@ class XaiProvider(Provider[AsyncClient]):
                 will be used if available.
             xai_client: An existing `xai_sdk.AsyncClient` to use.  This takes precedence over `api_key`.
         """
+        self._lazy_client: _LazyAsyncClient | None = None
         if xai_client is not None:
             self._client = xai_client
         else:
@@ -878,7 +889,8 @@ class XaiProvider(Provider[AsyncClient]):
                     'Set the `XAI_API_KEY` environment variable or pass it via `XaiProvider(api_key=...)`'
                     'to use the xAI provider.'
                 )
-            self._client = AsyncClient(api_key=api_key)
+            self._lazy_client = _LazyAsyncClient(api_key=api_key)
+            self._client = None  # type: ignore[assignment]
 ```
 
 #### __init__
@@ -928,6 +940,7 @@ def __init__(
             will be used if available.
         xai_client: An existing `xai_sdk.AsyncClient` to use.  This takes precedence over `api_key`.
     """
+    self._lazy_client: _LazyAsyncClient | None = None
     if xai_client is not None:
         self._client = xai_client
     else:
@@ -937,7 +950,8 @@ def __init__(
                 'Set the `XAI_API_KEY` environment variable or pass it via `XaiProvider(api_key=...)`'
                 'to use the xAI provider.'
             )
-        self._client = AsyncClient(api_key=api_key)
+        self._lazy_client = _LazyAsyncClient(api_key=api_key)
+        self._client = None  # type: ignore[assignment]
 ```
 
 ### DeepSeekProvider
@@ -964,7 +978,8 @@ class DeepSeekProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         profile = deepseek_model_profile(model_name)
 
         # As DeepSeekProvider is always used with OpenAIChatModel, which used to unconditionally use OpenAIJsonSchemaTransformer,
@@ -1039,7 +1054,32 @@ class BedrockModelProfile(ModelProfile):
     bedrock_send_back_thinking_parts: bool = False
     bedrock_supports_prompt_caching: bool = False
     bedrock_supports_tool_caching: bool = False
+    bedrock_supported_media_kinds_in_tool_returns: frozenset[str] = frozenset({'image'})
+
+    bedrock_thinking_variant: Literal['anthropic', 'openai', 'qwen'] | None = None
+    """Which thinking API shape to use for unified thinking translation.
+
+    - `'anthropic'`: Uses `{'thinking': {'type': 'enabled', 'budget_tokens': N}}`
+    - `'openai'`: Uses `{'reasoning_effort': 'low'|'medium'|'high'}`
+    - `'qwen'`: Uses `{'reasoning_config': 'low'|'high'}`
+    - `None`: No unified thinking support.
+    """
 ```
+
+#### bedrock_thinking_variant
+
+```python
+bedrock_thinking_variant: (
+    Literal["anthropic", "openai", "qwen"] | None
+) = None
+```
+
+Which thinking API shape to use for unified thinking translation.
+
+- `'anthropic'`: Uses `{'thinking': {'type': 'enabled', 'budget_tokens': N}}`
+- `'openai'`: Uses `{'reasoning_effort': 'low'|'medium'|'high'}`
+- `'qwen'`: Uses `{'reasoning_config': 'low'|'high'}`
+- `None`: No unified thinking support.
 
 ### bedrock_amazon_model_profile
 
@@ -1147,14 +1187,22 @@ class BedrockProvider(Provider[BaseClient]):
     def client(self) -> BaseClient:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile: dict[str, Callable[[str], ModelProfile | None]] = {
-            'anthropic': lambda model_name: BedrockModelProfile(
-                bedrock_supports_tool_choice=True,
-                bedrock_send_back_thinking_parts=True,
-                bedrock_supports_prompt_caching=True,
-                bedrock_supports_tool_caching=True,
-            ).update(_without_builtin_tools(anthropic_model_profile(model_name))),
+            'anthropic': lambda model_name: replace(
+                BedrockModelProfile(
+                    bedrock_supports_tool_choice=True,
+                    bedrock_send_back_thinking_parts=True,
+                    bedrock_supports_prompt_caching=True,
+                    bedrock_supports_tool_caching=True,
+                    bedrock_supported_media_kinds_in_tool_returns=frozenset({'image', 'document'}),
+                    bedrock_thinking_variant='anthropic',
+                ).update(_without_builtin_tools(anthropic_model_profile(model_name))),
+                # We don't currently support native structured output with Bedrock.
+                # See https://github.com/pydantic/pydantic-ai/issues/4209.
+                supports_json_schema_output=False,
+            ),
             'mistral': lambda model_name: BedrockModelProfile(bedrock_tool_result_format='json').update(
                 _without_builtin_tools(mistral_model_profile(model_name))
             ),
@@ -1162,6 +1210,14 @@ class BedrockProvider(Provider[BaseClient]):
             'amazon': bedrock_amazon_model_profile,
             'meta': lambda model_name: _without_builtin_tools(meta_model_profile(model_name)),
             'deepseek': lambda model_name: _without_builtin_tools(bedrock_deepseek_model_profile(model_name)),
+            'openai': lambda _mn: BedrockModelProfile(
+                bedrock_thinking_variant='openai',
+                supports_thinking=True,
+            ),
+            'qwen': lambda mn: BedrockModelProfile(
+                bedrock_thinking_variant='qwen',
+                supports_thinking='qwq' in mn or 'qwen3' in mn,
+            ),
         }
 
         # Split the model name into parts
@@ -1265,7 +1321,7 @@ class BedrockProvider(Provider[BaseClient]):
                         profile_name=profile_name,
                     )
                     config['signature_version'] = 'bearer'
-                else:
+                else:  # pragma: lax no cover
                     session = boto3.Session(
                         aws_access_key_id=aws_access_key_id,
                         aws_secret_access_key=aws_secret_access_key,
@@ -1396,7 +1452,7 @@ def __init__(
                     profile_name=profile_name,
                 )
                 config['signature_version'] = 'bearer'
-            else:
+            else:  # pragma: lax no cover
                 session = boto3.Session(
                     aws_access_key_id=aws_access_key_id,
                     aws_secret_access_key=aws_secret_access_key,
@@ -1480,7 +1536,8 @@ class GroqProvider(Provider[AsyncGroq]):
     def client(self) -> AsyncGroq:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         prefix_to_profile = {
             'llama': meta_model_profile,
             'meta-llama/': meta_groq_model_profile,
@@ -1661,7 +1718,8 @@ class AzureProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         model_name = model_name.lower()
 
         prefix_to_profile = {
@@ -1884,7 +1942,8 @@ class CohereProvider(Provider[AsyncClientV2]):
     def v1_client(self) -> AsyncClient | None:
         return self._v1_client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         return cohere_model_profile(model_name)
 
     def __init__(
@@ -2129,13 +2188,17 @@ class CerebrasProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         prefix_to_profile = {
             'llama': meta_model_profile,
             'qwen': qwen_model_profile,
             'gpt-oss': harmony_model_profile,
             'zai': zai_model_profile,
         }
+
+        # Reasoning models that support the cerebras_disable_reasoning setting
+        reasoning_prefixes = ('zai', 'gpt-oss')
 
         profile = None
         model_name_lower = model_name.lower()
@@ -2154,9 +2217,11 @@ class CerebrasProvider(Provider[AsyncOpenAI]):
             'parallel_tool_calls',
             'service_tier',
         )
+        is_reasoning = model_name_lower.startswith(reasoning_prefixes)
         return OpenAIModelProfile(
             json_schema_transformer=OpenAIJsonSchemaTransformer,
             openai_unsupported_model_settings=unsupported_model_settings,
+            supports_thinking=is_reasoning,
         ).update(profile)
 
     @overload
@@ -2316,7 +2381,8 @@ class MistralProvider(Provider[Mistral]):
     def client(self) -> Mistral:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         return mistral_model_profile(model_name)
 
     @overload
@@ -2459,7 +2525,8 @@ class FireworksProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         prefix_to_profile = {
             'llama': meta_model_profile,
             'qwen': qwen_model_profile,
@@ -2547,7 +2614,8 @@ class GrokProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         profile = grok_model_profile(model_name)
 
         # As the Grok API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer,
@@ -2614,7 +2682,8 @@ class TogetherProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'deepseek-ai': deepseek_model_profile,
             'google': google_model_profile,
@@ -2691,7 +2760,8 @@ class HerokuProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         # As the Heroku API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer.
         return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
 
@@ -2765,7 +2835,8 @@ class GitHubProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'xai': grok_model_profile,
             'meta': meta_model_profile,
@@ -2928,7 +2999,8 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'google': _openrouter_google_model_profile,
             'openai': openai_model_profile,
@@ -2948,6 +3020,8 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
         provider, model_name = model_name.split('/', 1)
         if provider in provider_to_profile:
             model_name, *_ = model_name.split(':', 1)  # drop tags
+            if provider == 'anthropic':
+                model_name = model_name.replace('.', '-')
             profile = provider_to_profile[provider](model_name)
 
         # As OpenRouterProvider is always used with OpenAIChatModel, which used to unconditionally use OpenAIJsonSchemaTransformer,
@@ -2957,6 +3031,7 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
             openai_chat_send_back_thinking_parts='field',
             openai_chat_thinking_field='reasoning',
             openai_chat_supports_file_urls=True,
+            openai_chat_supports_web_search=True,
         ).update(profile)
 
     @overload
@@ -2985,19 +3060,19 @@ class OpenRouterProvider(Provider[AsyncOpenAI]):
         """Configure the provider with either an API key or prebuilt client.
 
         Args:
-            api_key: OpenRouter API key. Falls back to ``OPENROUTER_API_KEY``
-                when omitted and required unless ``openai_client`` is provided.
+            api_key: OpenRouter API key. Falls back to `OPENROUTER_API_KEY`
+                when omitted and required unless `openai_client` is provided.
             app_url: Optional url for app attribution. Falls back to
-                ``OPENROUTER_APP_URL`` when omitted.
+                `OPENROUTER_APP_URL` when omitted.
             app_title: Optional title for app attribution. Falls back to
-                ``OPENROUTER_APP_TITLE`` when omitted.
-            openai_client: Existing ``AsyncOpenAI`` client to reuse instead of
+                `OPENROUTER_APP_TITLE` when omitted.
+            openai_client: Existing `AsyncOpenAI` client to reuse instead of
                 creating one internally.
-            http_client: Custom ``httpx.AsyncClient`` to pass into the
-                ``AsyncOpenAI`` constructor when building a client.
+            http_client: Custom `httpx.AsyncClient` to pass into the
+                `AsyncOpenAI` constructor when building a client.
 
         Raises:
-            UserError: If no API key is available and no ``openai_client`` is
+            UserError: If no API key is available and no `openai_client` is
                 provided.
         """
         api_key = api_key or os.getenv('OPENROUTER_API_KEY')
@@ -3087,19 +3162,19 @@ def __init__(
     """Configure the provider with either an API key or prebuilt client.
 
     Args:
-        api_key: OpenRouter API key. Falls back to ``OPENROUTER_API_KEY``
-            when omitted and required unless ``openai_client`` is provided.
+        api_key: OpenRouter API key. Falls back to `OPENROUTER_API_KEY`
+            when omitted and required unless `openai_client` is provided.
         app_url: Optional url for app attribution. Falls back to
-            ``OPENROUTER_APP_URL`` when omitted.
+            `OPENROUTER_APP_URL` when omitted.
         app_title: Optional title for app attribution. Falls back to
-            ``OPENROUTER_APP_TITLE`` when omitted.
-        openai_client: Existing ``AsyncOpenAI`` client to reuse instead of
+            `OPENROUTER_APP_TITLE` when omitted.
+        openai_client: Existing `AsyncOpenAI` client to reuse instead of
             creating one internally.
-        http_client: Custom ``httpx.AsyncClient`` to pass into the
-            ``AsyncOpenAI`` constructor when building a client.
+        http_client: Custom `httpx.AsyncClient` to pass into the
+            `AsyncOpenAI` constructor when building a client.
 
     Raises:
-        UserError: If no API key is available and no ``openai_client`` is
+        UserError: If no API key is available and no `openai_client` is
             provided.
     """
     api_key = api_key or os.getenv('OPENROUTER_API_KEY')
@@ -3150,7 +3225,8 @@ class VercelProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'anthropic': anthropic_model_profile,
             'bedrock': amazon_model_profile,
@@ -3164,11 +3240,10 @@ class VercelProvider(Provider[AsyncOpenAI]):
 
         profile = None
 
-        try:
-            provider, model_name = model_name.split('/', 1)
-        except ValueError:
-            raise UserError(f"Model name must be in 'provider/model' format, got: {model_name!r}")
+        if '/' not in model_name:
+            return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
 
+        provider, model_name = model_name.split('/', 1)
         if provider in provider_to_profile:
             profile = provider_to_profile[provider](model_name)
 
@@ -3237,13 +3312,21 @@ class HuggingFaceProvider(Provider[AsyncInferenceClient]):
 
     @property
     def base_url(self) -> str:
-        return self.client.model  # type: ignore
+        if self._client.model is not None:
+            return self._client.model
+        if self._client.provider is not None:
+            return INFERENCE_PROXY_TEMPLATE.format(provider=self._client.provider)
+        raise UserError(
+            'Unable to determine base URL for HuggingFace provider. '
+            'Please provide `base_url`, `provider_name`, or a pre-configured `hf_client`.'
+        )
 
     @property
     def client(self) -> AsyncInferenceClient:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'deepseek-ai': deepseek_model_profile,
             'google': google_model_profile,
@@ -3291,7 +3374,7 @@ class HuggingFaceProvider(Provider[AsyncInferenceClient]):
             api_key: The API key to use for authentication, if not provided, the `HF_TOKEN` environment variable
                 will be used if available.
             hf_client: An existing
-                [`AsyncInferenceClient`](https://huggingface.co/docs/huggingface_hub/v0.29.3/en/package_reference/inference_client#huggingface_hub.AsyncInferenceClient)
+                [`AsyncInferenceClient`](https://huggingface.co/docs/huggingface_hub/en/package_reference/inference_client#huggingface_hub.AsyncInferenceClient)
                 client to use. If not provided, a new instance will be created.
             http_client: (currently ignored) An existing `httpx.AsyncClient` to use for making HTTP requests.
             provider_name: Name of the provider to use for inference. available providers can be found in the [HF Inference Providers documentation](https://huggingface.co/docs/inference-providers/index#partners).
@@ -3402,7 +3485,7 @@ def __init__(
         api_key: The API key to use for authentication, if not provided, the `HF_TOKEN` environment variable
             will be used if available.
         hf_client: An existing
-            [`AsyncInferenceClient`](https://huggingface.co/docs/huggingface_hub/v0.29.3/en/package_reference/inference_client#huggingface_hub.AsyncInferenceClient)
+            [`AsyncInferenceClient`](https://huggingface.co/docs/huggingface_hub/en/package_reference/inference_client#huggingface_hub.AsyncInferenceClient)
             client to use. If not provided, a new instance will be created.
         http_client: (currently ignored) An existing `httpx.AsyncClient` to use for making HTTP requests.
         provider_name: Name of the provider to use for inference. available providers can be found in the [HF Inference Providers documentation](https://huggingface.co/docs/inference-providers/index#partners).
@@ -3452,7 +3535,8 @@ class MoonshotAIProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         profile = moonshotai_model_profile(model_name)
 
         # As the MoonshotAI API is OpenAI-compatible, let's assume we also need OpenAIJsonSchemaTransformer,
@@ -3525,7 +3609,8 @@ class OllamaProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         prefix_to_profile = {
             'llama': meta_model_profile,
             'gemma': google_model_profile,
@@ -3548,7 +3633,8 @@ class OllamaProvider(Provider[AsyncOpenAI]):
         return OpenAIModelProfile(
             json_schema_transformer=OpenAIJsonSchemaTransformer,
             openai_chat_thinking_field='reasoning',
-            openai_chat_send_back_thinking_parts='tags',
+            supports_json_schema_output=True,
+            supports_json_object_output=True,
         ).update(profile)
 
     def __init__(
@@ -3684,7 +3770,8 @@ class LiteLLMProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         # Map provider prefixes to their profile functions
         provider_to_profile = {
             'anthropic': anthropic_model_profile,
@@ -3875,7 +3962,8 @@ class NebiusProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         provider_to_profile = {
             'meta-llama': meta_model_profile,
             'deepseek-ai': deepseek_model_profile,
@@ -3888,11 +3976,11 @@ class NebiusProvider(Provider[AsyncOpenAI]):
 
         profile = None
 
-        try:
-            model_name = model_name.lower()
-            provider, model_name = model_name.split('/', 1)
-        except ValueError:
-            raise UserError(f"Model name must be in 'provider/model' format, got: {model_name!r}")
+        model_name = model_name.lower()
+        if '/' not in model_name:
+            return OpenAIModelProfile(json_schema_transformer=OpenAIJsonSchemaTransformer)
+
+        provider, model_name = model_name.split('/', 1)
         if provider in provider_to_profile:
             profile = provider_to_profile[provider](model_name)
 
@@ -3957,7 +4045,8 @@ class OVHcloudProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         model_name = model_name.lower()
 
         prefix_to_profile = {
@@ -4034,7 +4123,8 @@ class AlibabaProvider(Provider[AsyncOpenAI]):
     def client(self) -> AsyncOpenAI:
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         base_profile = qwen_model_profile(model_name)
 
         # Wrap/merge into OpenAIModelProfile
@@ -4116,7 +4206,8 @@ class SambaNovaProvider(Provider[AsyncOpenAI]):
         """Return the AsyncOpenAI client."""
         return self._client
 
-    def model_profile(self, model_name: str) -> ModelProfile | None:
+    @staticmethod
+    def model_profile(model_name: str) -> ModelProfile | None:
         """Get model profile for SambaNova models.
 
         SambaNova serves models from multiple families including Meta Llama,
@@ -4218,7 +4309,8 @@ SambaNova serves models from multiple families including Meta Llama, DeepSeek, Q
 Source code in `pydantic_ai_slim/pydantic_ai/providers/sambanova.py`
 
 ```python
-def model_profile(self, model_name: str) -> ModelProfile | None:
+@staticmethod
+def model_profile(model_name: str) -> ModelProfile | None:
     """Get model profile for SambaNova models.
 
     SambaNova serves models from multiple families including Meta Llama,

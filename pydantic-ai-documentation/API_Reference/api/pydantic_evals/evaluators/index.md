@@ -6,7 +6,7 @@ Bases: `Evaluator[object, object, object]`
 
 Check if the output contains the expected output.
 
-For strings, checks if expected_output is a substring of output. For lists/tuples, checks if expected_output is in output. For dicts, checks if all key-value pairs in expected_output are in output.
+For strings, checks if expected_output is a substring of output. For lists/tuples, checks if expected_output is in output. For dicts, checks if all key-value pairs in expected_output are in output. For model-like types (BaseModel, dataclasses), converts to a dict and checks key-value pairs.
 
 Note: case_sensitive only applies when both the value and output are strings.
 
@@ -20,6 +20,7 @@ class Contains(Evaluator[object, object, object]):
     For strings, checks if expected_output is a substring of output.
     For lists/tuples, checks if expected_output is in output.
     For dicts, checks if all key-value pairs in expected_output are in output.
+    For model-like types (BaseModel, dataclasses), converts to a dict and checks key-value pairs.
 
     Note: case_sensitive only applies when both the value and output are strings.
     """
@@ -53,25 +54,35 @@ class Contains(Evaluator[object, object, object]):
 
         try:
             # Handle different collection types
-            if isinstance(ctx.output, dict):
-                if isinstance(self.value, dict):
+            output_type = type(ctx.output)
+            output_is_model_like = is_model_like(output_type)
+            if isinstance(ctx.output, dict) or output_is_model_like:
+                if output_is_model_like:
+                    adapter: TypeAdapter[Any] = TypeAdapter(output_type)
+                    output_dict = adapter.dump_python(ctx.output)  # pyright: ignore[reportUnknownMemberType]
+                else:
                     # Cast to Any to avoid type checking issues
                     output_dict = cast(dict[Any, Any], ctx.output)  # pyright: ignore[reportUnknownMemberType]
+
+                if isinstance(self.value, dict):
+                    # Cast to Any to avoid type checking issues
                     expected_dict = cast(dict[Any, Any], self.value)  # pyright: ignore[reportUnknownMemberType]
                     for k in expected_dict:
                         if k not in output_dict:
                             k_trunc = _truncated_repr(k, max_length=30)
-                            failure_reason = f'Output dictionary does not contain expected key {k_trunc}'
+                            failure_reason = f'Output does not contain expected key {k_trunc}'
                             break
                         elif output_dict[k] != expected_dict[k]:
                             k_trunc = _truncated_repr(k, max_length=30)
                             output_v_trunc = _truncated_repr(output_dict[k], max_length=100)
                             expected_v_trunc = _truncated_repr(expected_dict[k], max_length=100)
-                            failure_reason = f'Output dictionary has different value for key {k_trunc}: {output_v_trunc} != {expected_v_trunc}'
+                            failure_reason = (
+                                f'Output has different value for key {k_trunc}: {output_v_trunc} != {expected_v_trunc}'
+                            )
                             break
                 else:
-                    if self.value not in ctx.output:  # pyright: ignore[reportUnknownMemberType]
-                        output_trunc = _truncated_repr(ctx.output, max_length=200)  # pyright: ignore[reportUnknownMemberType]
+                    if self.value not in output_dict:
+                        output_trunc = _truncated_repr(output_dict, max_length=200)
                         failure_reason = f'Output {output_trunc} does not contain provided value as a key'
             elif self.value not in ctx.output:  # pyright: ignore[reportOperatorIssue]  # will be handled by except block
                 output_trunc = _truncated_repr(ctx.output, max_length=200)
@@ -180,7 +191,7 @@ Bases: `Evaluator[object, object, object]`
 
 Judge whether the output of a language model meets the criteria of a provided rubric.
 
-If you do not specify a model, it uses the default model for judging. This starts as 'openai:gpt-4o', but can be overridden by calling set_default_judge_model.
+If you do not specify a model, it uses the default model for judging. This starts as 'openai:gpt-5.2', but can be overridden by calling set_default_judge_model.
 
 Source code in `pydantic_evals/pydantic_evals/evaluators/common.py`
 
@@ -189,7 +200,7 @@ Source code in `pydantic_evals/pydantic_evals/evaluators/common.py`
 class LLMJudge(Evaluator[object, object, object]):
     """Judge whether the output of a language model meets the criteria of a provided rubric.
 
-    If you do not specify a model, it uses the default model for judging. This starts as 'openai:gpt-4o', but can be
+    If you do not specify a model, it uses the default model for judging. This starts as 'openai:gpt-5.2', but can be
     overridden by calling [`set_default_judge_model`][pydantic_evals.evaluators.llm_as_a_judge.set_default_judge_model].
     """
 
@@ -248,7 +259,7 @@ class LLMJudge(Evaluator[object, object, object]):
         result = super().build_serialization_arguments()
         # always serialize the model as a string when present; use its name if it's a KnownModelName
         if (model := result.get('model')) and isinstance(model, models.Model):  # pragma: no branch
-            result['model'] = f'{model.system}:{model.model_name}'
+            result['model'] = model.model_id
 
         # Note: this may lead to confusion if you try to serialize-then-deserialize with a custom model.
         # I expect that is rare enough to be worth not solving yet, but common enough that we probably will want to
@@ -625,7 +636,7 @@ def downcast(self, *value_types: type[T]) -> EvaluationResult[T] | None:
 
 ### Evaluator
 
-Bases: `Generic[InputsT, OutputT, MetadataT]`
+Bases: `BaseEvaluator`, `Generic[InputsT, OutputT, MetadataT]`
 
 Base class for all evaluators.
 
@@ -651,7 +662,7 @@ Source code in `pydantic_evals/pydantic_evals/evaluators/evaluator.py`
 
 ````python
 @dataclass(repr=False)
-class Evaluator(Generic[InputsT, OutputT, MetadataT], metaclass=_StrictABCMeta):
+class Evaluator(BaseEvaluator, Generic[InputsT, OutputT, MetadataT]):
     """Base class for all evaluators.
 
     Evaluators can assess the performance of a task in a variety of ways, as a function of the EvaluatorContext.
@@ -671,17 +682,6 @@ class Evaluator(Generic[InputsT, OutputT, MetadataT], metaclass=_StrictABCMeta):
             return ctx.output == ctx.expected_output
     ```
     """
-
-    __pydantic_config__ = ConfigDict(arbitrary_types_allowed=True)
-
-    @classmethod
-    def get_serialization_name(cls) -> str:
-        """Return the 'name' of this Evaluator to use during serialization.
-
-        Returns:
-            The name of the Evaluator, which is typically the class name.
-        """
-        return cls.__name__
 
     @classmethod
     @deprecated('`name` has been renamed, use `get_serialization_name` instead.')
@@ -765,84 +765,7 @@ class Evaluator(Generic[InputsT, OutputT, MetadataT], metaclass=_StrictABCMeta):
             return await output
         else:
             return cast(EvaluatorOutput, output)
-
-    @model_serializer(mode='plain')
-    def serialize(self, info: SerializationInfo) -> Any:
-        """Serialize this Evaluator to a JSON-serializable form.
-
-        Returns:
-            A JSON-serializable representation of this evaluator as an EvaluatorSpec.
-        """
-        return to_jsonable_python(
-            self.as_spec(),
-            context=info.context,
-            serialize_unknown=True,
-        )
-
-    def as_spec(self) -> EvaluatorSpec:
-        raw_arguments = self.build_serialization_arguments()
-
-        arguments: None | tuple[Any,] | dict[str, Any]
-        if len(raw_arguments) == 0:
-            arguments = None
-        elif len(raw_arguments) == 1:
-            arguments = (next(iter(raw_arguments.values())),)
-        else:
-            arguments = raw_arguments
-
-        return EvaluatorSpec(name=self.get_serialization_name(), arguments=arguments)
-
-    def build_serialization_arguments(self) -> dict[str, Any]:
-        """Build the arguments for serialization.
-
-        Evaluators are serialized for inclusion as the "source" in an `EvaluationResult`.
-        If you want to modify how the evaluator is serialized for that or other purposes, you can override this method.
-
-        Returns:
-            A dictionary of arguments to be used during serialization.
-        """
-        raw_arguments: dict[str, Any] = {}
-        for field in fields(self):
-            value = getattr(self, field.name)
-            # always exclude defaults:
-            if field.default is not MISSING:
-                if value == field.default:
-                    continue
-            if field.default_factory is not MISSING:
-                if value == field.default_factory():  # pragma: no branch
-                    continue
-            raw_arguments[field.name] = value
-        return raw_arguments
-
-    __repr__ = _utils.dataclasses_no_defaults_repr
 ````
-
-#### get_serialization_name
-
-```python
-get_serialization_name() -> str
-```
-
-Return the 'name' of this Evaluator to use during serialization.
-
-Returns:
-
-| Type  | Description                                                   |
-| ----- | ------------------------------------------------------------- |
-| `str` | The name of the Evaluator, which is typically the class name. |
-
-Source code in `pydantic_evals/pydantic_evals/evaluators/evaluator.py`
-
-```python
-@classmethod
-def get_serialization_name(cls) -> str:
-    """Return the 'name' of this Evaluator to use during serialization.
-
-    Returns:
-        The name of the Evaluator, which is typically the class name.
-    """
-    return cls.__name__
-```
 
 #### name
 
@@ -1049,79 +972,6 @@ async def evaluate_async(self, ctx: EvaluatorContext[InputsT, OutputT, MetadataT
         return cast(EvaluatorOutput, output)
 ```
 
-#### serialize
-
-```python
-serialize(info: SerializationInfo) -> Any
-```
-
-Serialize this Evaluator to a JSON-serializable form.
-
-Returns:
-
-| Type  | Description                                                               |
-| ----- | ------------------------------------------------------------------------- |
-| `Any` | A JSON-serializable representation of this evaluator as an EvaluatorSpec. |
-
-Source code in `pydantic_evals/pydantic_evals/evaluators/evaluator.py`
-
-```python
-@model_serializer(mode='plain')
-def serialize(self, info: SerializationInfo) -> Any:
-    """Serialize this Evaluator to a JSON-serializable form.
-
-    Returns:
-        A JSON-serializable representation of this evaluator as an EvaluatorSpec.
-    """
-    return to_jsonable_python(
-        self.as_spec(),
-        context=info.context,
-        serialize_unknown=True,
-    )
-```
-
-#### build_serialization_arguments
-
-```python
-build_serialization_arguments() -> dict[str, Any]
-```
-
-Build the arguments for serialization.
-
-Evaluators are serialized for inclusion as the "source" in an `EvaluationResult`. If you want to modify how the evaluator is serialized for that or other purposes, you can override this method.
-
-Returns:
-
-| Type             | Description                                                |
-| ---------------- | ---------------------------------------------------------- |
-| `dict[str, Any]` | A dictionary of arguments to be used during serialization. |
-
-Source code in `pydantic_evals/pydantic_evals/evaluators/evaluator.py`
-
-```python
-def build_serialization_arguments(self) -> dict[str, Any]:
-    """Build the arguments for serialization.
-
-    Evaluators are serialized for inclusion as the "source" in an `EvaluationResult`.
-    If you want to modify how the evaluator is serialized for that or other purposes, you can override this method.
-
-    Returns:
-        A dictionary of arguments to be used during serialization.
-    """
-    raw_arguments: dict[str, Any] = {}
-    for field in fields(self):
-        value = getattr(self, field.name)
-        # always exclude defaults:
-        if field.default is not MISSING:
-            if value == field.default:
-                continue
-        if field.default_factory is not MISSING:
-            if value == field.default_factory():  # pragma: no branch
-                continue
-        raw_arguments[field.name] = value
-    return raw_arguments
-```
-
 ### EvaluatorFailure
 
 Represents a failure raised during the execution of an evaluator.
@@ -1153,7 +1003,9 @@ Type for the output of an evaluator, which can be a scalar, an EvaluationReason,
 
 ### EvaluatorSpec
 
-Bases: `BaseModel`
+```python
+EvaluatorSpec = NamedSpec
+```
 
 The specification of an evaluator to be run.
 
@@ -1161,99 +1013,452 @@ This class is used to represent evaluators in a serializable format, supporting 
 
 In particular, each of the following forms is supported for specifying an evaluator with name `MyEvaluator`: * `'MyEvaluator'` - Just the (string) name of the Evaluator subclass is used if its `__init__` takes no arguments * `{'MyEvaluator': first_arg}` - A single argument is passed as the first positional argument to `MyEvaluator.__init__` * `{'MyEvaluator': {k1: v1, k2: v2}}` - Multiple kwargs are passed to `MyEvaluator.__init__`
 
-Source code in `pydantic_evals/pydantic_evals/evaluators/spec.py`
+### ConfusionMatrixEvaluator
+
+Bases: `ReportEvaluator`
+
+Computes a confusion matrix from case data.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_common.py`
 
 ```python
-class EvaluatorSpec(BaseModel):
-    """The specification of an evaluator to be run.
+@dataclass(repr=False)
+class ConfusionMatrixEvaluator(ReportEvaluator):
+    """Computes a confusion matrix from case data."""
 
-    This class is used to represent evaluators in a serializable format, supporting various
-    short forms for convenience when defining evaluators in YAML or JSON dataset files.
+    predicted_from: Literal['expected_output', 'output', 'metadata', 'labels'] = 'output'
+    predicted_key: str | None = None
 
-    In particular, each of the following forms is supported for specifying an evaluator with name `MyEvaluator`:
-    * `'MyEvaluator'` - Just the (string) name of the Evaluator subclass is used if its `__init__` takes no arguments
-    * `{'MyEvaluator': first_arg}` - A single argument is passed as the first positional argument to `MyEvaluator.__init__`
-    * `{'MyEvaluator': {k1: v1, k2: v2}}` - Multiple kwargs are passed to `MyEvaluator.__init__`
+    expected_from: Literal['expected_output', 'output', 'metadata', 'labels'] = 'expected_output'
+    expected_key: str | None = None
+
+    title: str = 'Confusion Matrix'
+
+    def evaluate(self, ctx: ReportEvaluatorContext[Any, Any, Any]) -> ConfusionMatrix:
+        predicted: list[str] = []
+        expected: list[str] = []
+
+        for case in ctx.report.cases:
+            pred = self._extract(case, self.predicted_from, self.predicted_key)
+            exp = self._extract(case, self.expected_from, self.expected_key)
+            if pred is None or exp is None:
+                continue
+            predicted.append(pred)
+            expected.append(exp)
+
+        all_labels = sorted(set(predicted) | set(expected))
+        label_to_idx = {label: i for i, label in enumerate(all_labels)}
+        matrix = [[0] * len(all_labels) for _ in all_labels]
+
+        for e, p in zip(expected, predicted):
+            matrix[label_to_idx[e]][label_to_idx[p]] += 1
+
+        return ConfusionMatrix(
+            title=self.title,
+            class_labels=all_labels,
+            matrix=matrix,
+        )
+
+    @staticmethod
+    def _extract(
+        case: ReportCase[Any, Any, Any],
+        from_: Literal['expected_output', 'output', 'metadata', 'labels'],
+        key: str | None,
+    ) -> str | None:
+        if from_ == 'expected_output':
+            return str(case.expected_output) if case.expected_output is not None else None
+        elif from_ == 'output':
+            return str(case.output) if case.output is not None else None
+        elif from_ == 'metadata':
+            if key is not None:
+                if isinstance(case.metadata, dict):
+                    metadata_dict = cast(dict[str, Any], case.metadata)  # pyright: ignore[reportUnknownMemberType]
+                    val = metadata_dict.get(key)
+                    return str(val) if val is not None else None
+                return None  # key requested but metadata isn't a dict — skip this case
+            return str(case.metadata) if case.metadata is not None else None
+        elif from_ == 'labels':
+            if key is None:
+                raise ValueError("'key' is required when from_='labels'")
+            label_result = case.labels.get(key)
+            return label_result.value if label_result else None
+        assert_never(from_)
+```
+
+### KolmogorovSmirnovEvaluator
+
+Bases: `ReportEvaluator`
+
+Computes a Kolmogorov-Smirnov plot and statistic from case data.
+
+Plots the empirical CDFs of the score distribution for positive and negative cases, and computes the KS statistic (maximum vertical distance between the two CDFs).
+
+Returns a `LinePlot` with the two CDF curves and a `ScalarResult` with the KS statistic.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_common.py`
+
+```python
+@dataclass(repr=False)
+class KolmogorovSmirnovEvaluator(ReportEvaluator):
+    """Computes a Kolmogorov-Smirnov plot and statistic from case data.
+
+    Plots the empirical CDFs of the score distribution for positive and negative cases,
+    and computes the KS statistic (maximum vertical distance between the two CDFs).
+
+    Returns a `LinePlot` with the two CDF curves and a `ScalarResult` with the KS statistic.
     """
+
+    score_key: str
+    positive_from: Literal['expected_output', 'assertions', 'labels']
+    positive_key: str | None = None
+
+    score_from: Literal['scores', 'metrics'] = 'scores'
+
+    title: str = 'KS Plot'
+    n_thresholds: int = 100
+
+    def evaluate(self, ctx: ReportEvaluatorContext[Any, Any, Any]) -> list[ReportAnalysis]:
+        scored_cases = _extract_scored_cases(
+            ctx.report.cases, self.score_key, self.score_from, self.positive_from, self.positive_key
+        )
+
+        empty_result: list[ReportAnalysis] = [
+            LinePlot(
+                title=self.title,
+                x_label='Score',
+                y_label='Cumulative Probability',
+                y_range=(0, 1),
+                curves=[],
+            ),
+            ScalarResult(title='KS Statistic', value=float('nan')),
+        ]
+        if not scored_cases:
+            return empty_result
+
+        pos_scores = sorted(s for s, p in scored_cases if p)
+        neg_scores = sorted(s for s, p in scored_cases if not p)
+
+        if not pos_scores or not neg_scores:
+            return empty_result
+
+        # Compute CDFs at all unique scores using binary search
+        all_scores = sorted({s for s, _ in scored_cases})
+        # Start both CDFs at y=0 at the minimum score
+        pos_cdf: list[tuple[float, float]] = [(all_scores[0], 0.0)]
+        neg_cdf: list[tuple[float, float]] = [(all_scores[0], 0.0)]
+        ks_stat = 0.0
+
+        for score in all_scores:
+            pos_val = bisect_right(pos_scores, score) / len(pos_scores)
+            neg_val = bisect_right(neg_scores, score) / len(neg_scores)
+            pos_cdf.append((score, pos_val))
+            neg_cdf.append((score, neg_val))
+            ks_stat = max(ks_stat, abs(pos_val - neg_val))
+
+        # Downsample for display
+        display_pos = _downsample(pos_cdf, self.n_thresholds)
+        display_neg = _downsample(neg_cdf, self.n_thresholds)
+
+        pos_curve = LinePlotCurve(
+            name='Positive',
+            points=[LinePlotPoint(x=s, y=v) for s, v in display_pos],
+            step='end',
+        )
+        neg_curve = LinePlotCurve(
+            name='Negative',
+            points=[LinePlotPoint(x=s, y=v) for s, v in display_neg],
+            step='end',
+        )
+
+        return [
+            LinePlot(
+                title=self.title,
+                x_label='Score',
+                y_label='Cumulative Probability',
+                y_range=(0, 1),
+                curves=[pos_curve, neg_curve],
+            ),
+            ScalarResult(title='KS Statistic', value=ks_stat),
+        ]
+```
+
+### PrecisionRecallEvaluator
+
+Bases: `ReportEvaluator`
+
+Computes a precision-recall curve from case data.
+
+Returns both a `PrecisionRecall` chart and a `ScalarResult` with the AUC value. The AUC is computed at full resolution (every unique score threshold) for accuracy, while the chart points are downsampled to `n_thresholds` for display.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_common.py`
+
+```python
+@dataclass(repr=False)
+class PrecisionRecallEvaluator(ReportEvaluator):
+    """Computes a precision-recall curve from case data.
+
+    Returns both a `PrecisionRecall` chart and a `ScalarResult` with the AUC value.
+    The AUC is computed at full resolution (every unique score threshold) for accuracy,
+    while the chart points are downsampled to `n_thresholds` for display.
+    """
+
+    score_key: str
+    positive_from: Literal['expected_output', 'assertions', 'labels']
+    positive_key: str | None = None
+
+    score_from: Literal['scores', 'metrics'] = 'scores'
+
+    title: str = 'Precision-Recall Curve'
+    n_thresholds: int = 100
+
+    def evaluate(self, ctx: ReportEvaluatorContext[Any, Any, Any]) -> list[ReportAnalysis]:
+        scored_cases = _extract_scored_cases(
+            ctx.report.cases, self.score_key, self.score_from, self.positive_from, self.positive_key
+        )
+
+        if not scored_cases:
+            return [
+                PrecisionRecall(title=self.title, curves=[]),
+                ScalarResult(title=f'{self.title} AUC', value=float('nan')),
+            ]
+
+        total_positives = sum(1 for _, p in scored_cases if p)
+
+        # Compute precision/recall at every unique score for exact AUC
+        unique_thresholds = sorted({s for s, _ in scored_cases}, reverse=True)
+        # Start with anchor at (recall=0, precision=1) — the "no predictions" point
+        max_score = unique_thresholds[0]
+        all_points: list[PrecisionRecallPoint] = [PrecisionRecallPoint(threshold=max_score, precision=1.0, recall=0.0)]
+        for threshold in unique_thresholds:
+            tp = sum(1 for s, p in scored_cases if s >= threshold and p)
+            fp = sum(1 for s, p in scored_cases if s >= threshold and not p)
+            fn = total_positives - tp
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 1.0
+            recall = tp / (fn + tp) if (fn + tp) > 0 else 0.0
+            all_points.append(PrecisionRecallPoint(threshold=threshold, precision=precision, recall=recall))
+
+        # Exact AUC from the full-resolution points (anchor included)
+        auc_points = [(p.recall, p.precision) for p in all_points]
+        auc = _trapezoidal_auc(auc_points)
+
+        # Downsample for display
+        if len(all_points) <= self.n_thresholds or self.n_thresholds <= 1:
+            display_points = all_points
+        else:
+            indices = sorted(
+                {int(i * (len(all_points) - 1) / (self.n_thresholds - 1)) for i in range(self.n_thresholds)}
+            )
+            display_points = [all_points[i] for i in indices]
+
+        curve = PrecisionRecallCurve(name=ctx.name, points=display_points, auc=auc)
+        return [
+            PrecisionRecall(title=self.title, curves=[curve]),
+            ScalarResult(title=f'{self.title} AUC', value=auc),
+        ]
+```
+
+### ROCAUCEvaluator
+
+Bases: `ReportEvaluator`
+
+Computes an ROC curve and AUC from case data.
+
+Returns a `LinePlot` with the ROC curve (plus a dashed random-baseline diagonal) and a `ScalarResult` with the AUC value.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_common.py`
+
+```python
+@dataclass(repr=False)
+class ROCAUCEvaluator(ReportEvaluator):
+    """Computes an ROC curve and AUC from case data.
+
+    Returns a `LinePlot` with the ROC curve (plus a dashed random-baseline diagonal)
+    and a `ScalarResult` with the AUC value.
+    """
+
+    score_key: str
+    positive_from: Literal['expected_output', 'assertions', 'labels']
+    positive_key: str | None = None
+
+    score_from: Literal['scores', 'metrics'] = 'scores'
+
+    title: str = 'ROC Curve'
+    n_thresholds: int = 100
+
+    def evaluate(self, ctx: ReportEvaluatorContext[Any, Any, Any]) -> list[ReportAnalysis]:
+        scored_cases = _extract_scored_cases(
+            ctx.report.cases, self.score_key, self.score_from, self.positive_from, self.positive_key
+        )
+
+        empty_result: list[ReportAnalysis] = [
+            LinePlot(
+                title=self.title,
+                x_label='False Positive Rate',
+                y_label='True Positive Rate',
+                x_range=(0, 1),
+                y_range=(0, 1),
+                curves=[],
+            ),
+            ScalarResult(title=f'{self.title} AUC', value=float('nan')),
+        ]
+        if not scored_cases:
+            return empty_result
+
+        total_positives = sum(1 for _, p in scored_cases if p)
+        total_negatives = len(scored_cases) - total_positives
+
+        if total_positives == 0 or total_negatives == 0:
+            return empty_result
+
+        # Compute TPR/FPR at every unique score for exact AUC
+        unique_thresholds = sorted({s for s, _ in scored_cases}, reverse=True)
+        all_fpr_tpr: list[tuple[float, float]] = [(0.0, 0.0)]
+        for threshold in unique_thresholds:
+            tp = sum(1 for s, p in scored_cases if s >= threshold and p)
+            fp = sum(1 for s, p in scored_cases if s >= threshold and not p)
+            tpr = tp / total_positives
+            fpr = fp / total_negatives
+            all_fpr_tpr.append((fpr, tpr))
+        all_fpr_tpr.sort()
+
+        # Exact AUC
+        auc = _trapezoidal_auc(all_fpr_tpr)
+
+        # Downsample for display
+        downsampled = _downsample(all_fpr_tpr, self.n_thresholds)
+
+        roc_curve = LinePlotCurve(
+            name=f'{ctx.name} (AUC: {auc:.3f})',
+            points=[LinePlotPoint(x=fpr, y=tpr) for fpr, tpr in downsampled],
+        )
+        baseline = LinePlotCurve(
+            name='Random',
+            points=[LinePlotPoint(x=0, y=0), LinePlotPoint(x=1, y=1)],
+            style='dashed',
+        )
+
+        return [
+            LinePlot(
+                title=self.title,
+                x_label='False Positive Rate',
+                y_label='True Positive Rate',
+                x_range=(0, 1),
+                y_range=(0, 1),
+                curves=[roc_curve, baseline],
+            ),
+            ScalarResult(title=f'{self.title} AUC', value=auc),
+        ]
+```
+
+### ReportEvaluator
+
+Bases: `BaseEvaluator`, `Generic[InputsT, OutputT, MetadataT]`
+
+Base class for experiment-wide evaluators that analyze full reports.
+
+Unlike case-level Evaluators which assess individual task outputs, ReportEvaluators see all case results together and produce experiment-wide analyses like confusion matrices, precision-recall curves, or scalar statistics.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_evaluator.py`
+
+```python
+@dataclass(repr=False)
+class ReportEvaluator(BaseEvaluator, Generic[InputsT, OutputT, MetadataT]):
+    """Base class for experiment-wide evaluators that analyze full reports.
+
+    Unlike case-level Evaluators which assess individual task outputs,
+    ReportEvaluators see all case results together and produce
+    experiment-wide analyses like confusion matrices, precision-recall curves,
+    or scalar statistics.
+    """
+
+    @abstractmethod
+    def evaluate(
+        self, ctx: ReportEvaluatorContext[InputsT, OutputT, MetadataT]
+    ) -> ReportAnalysis | list[ReportAnalysis] | Awaitable[ReportAnalysis | list[ReportAnalysis]]:
+        """Evaluate the full report and return experiment-wide analysis/analyses."""
+        ...
+
+    async def evaluate_async(
+        self, ctx: ReportEvaluatorContext[InputsT, OutputT, MetadataT]
+    ) -> ReportAnalysis | list[ReportAnalysis]:
+        """Evaluate, handling both sync and async implementations."""
+        output = self.evaluate(ctx)
+        if inspect.iscoroutine(output):
+            return await output
+        return cast('ReportAnalysis | list[ReportAnalysis]', output)
+```
+
+#### evaluate
+
+```python
+evaluate(
+    ctx: ReportEvaluatorContext[
+        InputsT, OutputT, MetadataT
+    ],
+) -> (
+    ReportAnalysis
+    | list[ReportAnalysis]
+    | Awaitable[ReportAnalysis | list[ReportAnalysis]]
+)
+```
+
+Evaluate the full report and return experiment-wide analysis/analyses.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_evaluator.py`
+
+```python
+@abstractmethod
+def evaluate(
+    self, ctx: ReportEvaluatorContext[InputsT, OutputT, MetadataT]
+) -> ReportAnalysis | list[ReportAnalysis] | Awaitable[ReportAnalysis | list[ReportAnalysis]]:
+    """Evaluate the full report and return experiment-wide analysis/analyses."""
+    ...
+```
+
+#### evaluate_async
+
+```python
+evaluate_async(
+    ctx: ReportEvaluatorContext[
+        InputsT, OutputT, MetadataT
+    ],
+) -> ReportAnalysis | list[ReportAnalysis]
+```
+
+Evaluate, handling both sync and async implementations.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_evaluator.py`
+
+```python
+async def evaluate_async(
+    self, ctx: ReportEvaluatorContext[InputsT, OutputT, MetadataT]
+) -> ReportAnalysis | list[ReportAnalysis]:
+    """Evaluate, handling both sync and async implementations."""
+    output = self.evaluate(ctx)
+    if inspect.iscoroutine(output):
+        return await output
+    return cast('ReportAnalysis | list[ReportAnalysis]', output)
+```
+
+### ReportEvaluatorContext
+
+Bases: `Generic[InputsT, OutputT, MetadataT]`
+
+Context for report-level evaluation, containing the full experiment results.
+
+Source code in `pydantic_evals/pydantic_evals/evaluators/report_evaluator.py`
+
+```python
+@dataclass(kw_only=True)
+class ReportEvaluatorContext(Generic[InputsT, OutputT, MetadataT]):
+    """Context for report-level evaluation, containing the full experiment results."""
 
     name: str
-    """The name of the evaluator class; should be the value returned by `EvaluatorClass.get_serialization_name()`"""
-
-    arguments: None | tuple[Any] | dict[str, Any]
-    """The arguments to pass to the evaluator's constructor.
-
-    Can be None (no arguments), a tuple (a single positional argument), or a dict (keyword arguments).
-    """
-
-    @property
-    def args(self) -> tuple[Any, ...]:
-        """Get the positional arguments for the evaluator.
-
-        Returns:
-            A tuple of positional arguments if arguments is a tuple, otherwise an empty tuple.
-        """
-        if isinstance(self.arguments, tuple):
-            return self.arguments
-        return ()
-
-    @property
-    def kwargs(self) -> dict[str, Any]:
-        """Get the keyword arguments for the evaluator.
-
-        Returns:
-            A dictionary of keyword arguments if arguments is a dict, otherwise an empty dict.
-        """
-        if isinstance(self.arguments, dict):
-            return self.arguments
-        return {}
-
-    @model_validator(mode='wrap')
-    @classmethod
-    def deserialize(cls, value: Any, handler: ModelWrapValidatorHandler[EvaluatorSpec]) -> EvaluatorSpec:
-        """Deserialize an EvaluatorSpec from various formats.
-
-        This validator handles the various short forms of evaluator specifications,
-        converting them to a consistent EvaluatorSpec instance.
-
-        Args:
-            value: The value to deserialize.
-            handler: The validator handler.
-
-        Returns:
-            The deserialized EvaluatorSpec.
-
-        Raises:
-            ValidationError: If the value cannot be deserialized.
-        """
-        try:
-            result = handler(value)
-            return result
-        except ValidationError as exc:
-            try:
-                deserialized = _SerializedEvaluatorSpec.model_validate(value)
-            except ValidationError:
-                raise exc  # raise the original error
-            return deserialized.to_evaluator_spec()
-
-    @model_serializer(mode='wrap')
-    def serialize(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
-        """Serialize using the appropriate short-form if possible.
-
-        Returns:
-            The serialized evaluator specification, using the shortest form possible:
-            - Just the name if there are no arguments
-            - {name: first_arg} if there's a single positional argument
-            - {name: {kwargs}} if there are multiple (keyword) arguments
-        """
-        if isinstance(info.context, dict) and info.context.get('use_short_form'):  # pyright: ignore[reportUnknownMemberType]
-            if self.arguments is None:
-                return self.name
-            elif isinstance(self.arguments, tuple):
-                return {self.name: self.arguments[0]}
-            else:
-                return {self.name: self.arguments}
-        else:
-            return handler(self)
+    """The experiment name."""
+    report: EvaluationReport[InputsT, OutputT, MetadataT]
+    """The full evaluation report."""
+    experiment_metadata: dict[str, Any] | None
+    """Experiment-level metadata."""
 ```
 
 #### name
@@ -1262,153 +1467,23 @@ class EvaluatorSpec(BaseModel):
 name: str
 ```
 
-The name of the evaluator class; should be the value returned by `EvaluatorClass.get_serialization_name()`
+The experiment name.
 
-#### arguments
-
-```python
-arguments: None | tuple[Any] | dict[str, Any]
-```
-
-The arguments to pass to the evaluator's constructor.
-
-Can be None (no arguments), a tuple (a single positional argument), or a dict (keyword arguments).
-
-#### args
+#### report
 
 ```python
-args: tuple[Any, ...]
+report: EvaluationReport[InputsT, OutputT, MetadataT]
 ```
 
-Get the positional arguments for the evaluator.
+The full evaluation report.
 
-Returns:
-
-| Type              | Description                                                                        |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| `tuple[Any, ...]` | A tuple of positional arguments if arguments is a tuple, otherwise an empty tuple. |
-
-#### kwargs
+#### experiment_metadata
 
 ```python
-kwargs: dict[str, Any]
+experiment_metadata: dict[str, Any] | None
 ```
 
-Get the keyword arguments for the evaluator.
-
-Returns:
-
-| Type             | Description                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `dict[str, Any]` | A dictionary of keyword arguments if arguments is a dict, otherwise an empty dict. |
-
-#### deserialize
-
-```python
-deserialize(
-    value: Any,
-    handler: ModelWrapValidatorHandler[EvaluatorSpec],
-) -> EvaluatorSpec
-```
-
-Deserialize an EvaluatorSpec from various formats.
-
-This validator handles the various short forms of evaluator specifications, converting them to a consistent EvaluatorSpec instance.
-
-Parameters:
-
-| Name      | Type                                       | Description               | Default    |
-| --------- | ------------------------------------------ | ------------------------- | ---------- |
-| `value`   | `Any`                                      | The value to deserialize. | *required* |
-| `handler` | `ModelWrapValidatorHandler[EvaluatorSpec]` | The validator handler.    | *required* |
-
-Returns:
-
-| Type            | Description                     |
-| --------------- | ------------------------------- |
-| `EvaluatorSpec` | The deserialized EvaluatorSpec. |
-
-Raises:
-
-| Type              | Description                          |
-| ----------------- | ------------------------------------ |
-| `ValidationError` | If the value cannot be deserialized. |
-
-Source code in `pydantic_evals/pydantic_evals/evaluators/spec.py`
-
-```python
-@model_validator(mode='wrap')
-@classmethod
-def deserialize(cls, value: Any, handler: ModelWrapValidatorHandler[EvaluatorSpec]) -> EvaluatorSpec:
-    """Deserialize an EvaluatorSpec from various formats.
-
-    This validator handles the various short forms of evaluator specifications,
-    converting them to a consistent EvaluatorSpec instance.
-
-    Args:
-        value: The value to deserialize.
-        handler: The validator handler.
-
-    Returns:
-        The deserialized EvaluatorSpec.
-
-    Raises:
-        ValidationError: If the value cannot be deserialized.
-    """
-    try:
-        result = handler(value)
-        return result
-    except ValidationError as exc:
-        try:
-            deserialized = _SerializedEvaluatorSpec.model_validate(value)
-        except ValidationError:
-            raise exc  # raise the original error
-        return deserialized.to_evaluator_spec()
-```
-
-#### serialize
-
-```python
-serialize(
-    handler: SerializerFunctionWrapHandler,
-    info: SerializationInfo,
-) -> Any
-```
-
-Serialize using the appropriate short-form if possible.
-
-Returns:
-
-| Type  | Description                                                               |
-| ----- | ------------------------------------------------------------------------- |
-| `Any` | The serialized evaluator specification, using the shortest form possible: |
-| `Any` | Just the name if there are no arguments                                   |
-| `Any` | {name: first_arg} if there's a single positional argument                 |
-| `Any` | {name: {kwargs}} if there are multiple (keyword) arguments                |
-
-Source code in `pydantic_evals/pydantic_evals/evaluators/spec.py`
-
-```python
-@model_serializer(mode='wrap')
-def serialize(self, handler: SerializerFunctionWrapHandler, info: SerializationInfo) -> Any:
-    """Serialize using the appropriate short-form if possible.
-
-    Returns:
-        The serialized evaluator specification, using the shortest form possible:
-        - Just the name if there are no arguments
-        - {name: first_arg} if there's a single positional argument
-        - {name: {kwargs}} if there are multiple (keyword) arguments
-    """
-    if isinstance(info.context, dict) and info.context.get('use_short_form'):  # pyright: ignore[reportUnknownMemberType]
-        if self.arguments is None:
-            return self.name
-        elif isinstance(self.arguments, tuple):
-            return {self.name: self.arguments[0]}
-        else:
-            return {self.name: self.arguments}
-    else:
-        return handler(self)
-```
+Experiment-level metadata.
 
 ### GradingOutput
 
@@ -1440,7 +1515,7 @@ judge_output(
 
 Judge the output of a model based on a rubric.
 
-If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o', but this can be changed using the `set_default_judge_model` function.
+If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2', but this can be changed using the `set_default_judge_model` function.
 
 Source code in `pydantic_evals/pydantic_evals/evaluators/llm_as_a_judge.py`
 
@@ -1453,7 +1528,7 @@ async def judge_output(
 ) -> GradingOutput:
     """Judge the output of a model based on a rubric.
 
-    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o',
+    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2',
     but this can be changed using the `set_default_judge_model` function.
     """
     user_prompt = _build_prompt(output=output, rubric=rubric)
@@ -1476,7 +1551,7 @@ judge_input_output(
 
 Judge the output of a model based on the inputs and a rubric.
 
-If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o', but this can be changed using the `set_default_judge_model` function.
+If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2', but this can be changed using the `set_default_judge_model` function.
 
 Source code in `pydantic_evals/pydantic_evals/evaluators/llm_as_a_judge.py`
 
@@ -1490,7 +1565,7 @@ async def judge_input_output(
 ) -> GradingOutput:
     """Judge the output of a model based on the inputs and a rubric.
 
-    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o',
+    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2',
     but this can be changed using the `set_default_judge_model` function.
     """
     user_prompt = _build_prompt(inputs=inputs, output=output, rubric=rubric)
@@ -1515,7 +1590,7 @@ judge_input_output_expected(
 
 Judge the output of a model based on the inputs and a rubric.
 
-If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o', but this can be changed using the `set_default_judge_model` function.
+If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2', but this can be changed using the `set_default_judge_model` function.
 
 Source code in `pydantic_evals/pydantic_evals/evaluators/llm_as_a_judge.py`
 
@@ -1530,7 +1605,7 @@ async def judge_input_output_expected(
 ) -> GradingOutput:
     """Judge the output of a model based on the inputs and a rubric.
 
-    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o',
+    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2',
     but this can be changed using the `set_default_judge_model` function.
     """
     user_prompt = _build_prompt(inputs=inputs, output=output, rubric=rubric, expected_output=expected_output)
@@ -1556,7 +1631,7 @@ judge_output_expected(
 
 Judge the output of a model based on the expected output, output, and a rubric.
 
-If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o', but this can be changed using the `set_default_judge_model` function.
+If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2', but this can be changed using the `set_default_judge_model` function.
 
 Source code in `pydantic_evals/pydantic_evals/evaluators/llm_as_a_judge.py`
 
@@ -1570,7 +1645,7 @@ async def judge_output_expected(
 ) -> GradingOutput:
     """Judge the output of a model based on the expected output, output, and a rubric.
 
-    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-4o',
+    If the model is not specified, a default model is used. The default model starts as 'openai:gpt-5.2',
     but this can be changed using the `set_default_judge_model` function.
     """
     user_prompt = _build_prompt(output=output, rubric=rubric, expected_output=expected_output)

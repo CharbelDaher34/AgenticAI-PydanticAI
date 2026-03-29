@@ -86,7 +86,7 @@ class AGUIAdapter(UIAdapter[RunAgentInput, Message, BaseEvent, AgentDepsT, Outpu
                                 case _:  # pragma: no cover
                                     raise ValueError(f'Unsupported user message part type: {type(part)}')
 
-                        if user_prompt_content:  # pragma: no branch
+                        if user_prompt_content:
                             content_to_add = (
                                 user_prompt_content[0]
                                 if len(user_prompt_content) == 1 and isinstance(user_prompt_content[0], str)
@@ -132,10 +132,16 @@ class AGUIAdapter(UIAdapter[RunAgentInput, Message, BaseEvent, AgentDepsT, Outpu
 
                     if tool_call_id.startswith(BUILTIN_TOOL_CALL_ID_PREFIX):
                         _, provider_name, original_id = tool_call_id.split('|', 2)
+                        content: Any = tool_msg.content
+                        if isinstance(content, str):
+                            try:
+                                content = json.loads(content)
+                            except (json.JSONDecodeError, ValueError):
+                                pass
                         builder.add(
                             BuiltinToolReturnPart(
                                 tool_name=tool_name,
-                                content=tool_msg.content,
+                                content=content,
                                 tool_call_id=original_id,
                                 provider_name=provider_name,
                             )
@@ -268,7 +274,7 @@ def load_messages(cls, messages: Sequence[Message]) -> list[ModelMessage]:  # no
                             case _:  # pragma: no cover
                                 raise ValueError(f'Unsupported user message part type: {type(part)}')
 
-                    if user_prompt_content:  # pragma: no branch
+                    if user_prompt_content:
                         content_to_add = (
                             user_prompt_content[0]
                             if len(user_prompt_content) == 1 and isinstance(user_prompt_content[0], str)
@@ -314,10 +320,16 @@ def load_messages(cls, messages: Sequence[Message]) -> list[ModelMessage]:  # no
 
                 if tool_call_id.startswith(BUILTIN_TOOL_CALL_ID_PREFIX):
                     _, provider_name, original_id = tool_call_id.split('|', 2)
+                    content: Any = tool_msg.content
+                    if isinstance(content, str):
+                        try:
+                            content = json.loads(content)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
                     builder.add(
                         BuiltinToolReturnPart(
                             tool_name=tool_name,
-                            content=tool_msg.content,
+                            content=content,
                             tool_call_id=original_id,
                             provider_name=provider_name,
                         )
@@ -492,17 +504,23 @@ class AGUIEventStream(UIEventStream[RunAgentInput, BaseEvent, AgentDepsT, Output
 
     async def handle_builtin_tool_return(self, part: BuiltinToolReturnPart) -> AsyncIterator[BaseEvent]:
         tool_call_id = self._builtin_tool_call_ids[part.tool_call_id]
+        # Use a one-off message ID instead of `self.new_message_id()` to avoid
+        # mutating `self.message_id`, which is used as `parent_message_id` for
+        # subsequent tool calls in the same response.
         yield ToolCallResultEvent(
-            message_id=self.new_message_id(),
+            message_id=str(uuid4()),
             type=EventType.TOOL_CALL_RESULT,
             role='tool',
             tool_call_id=tool_call_id,
-            content=part.model_response_str(),
+            content=_tool_return_content(part),
         )
 
     async def handle_function_tool_result(self, event: FunctionToolResultEvent) -> AsyncIterator[BaseEvent]:
         result = event.result
-        output = result.model_response() if isinstance(result, RetryPromptPart) else result.model_response_str()
+        if isinstance(result, RetryPromptPart):
+            output = result.model_response()
+        else:
+            output = _tool_return_content(result)
 
         yield ToolCallResultEvent(
             message_id=self.new_message_id(),

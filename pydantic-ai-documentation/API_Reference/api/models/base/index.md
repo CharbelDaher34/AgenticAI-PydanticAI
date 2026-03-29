@@ -26,10 +26,12 @@ KnownModelName = TypeAliasType(
         "anthropic:claude-opus-4-20250514",
         "anthropic:claude-opus-4-5-20251101",
         "anthropic:claude-opus-4-5",
+        "anthropic:claude-opus-4-6",
         "anthropic:claude-sonnet-4-0",
         "anthropic:claude-sonnet-4-20250514",
         "anthropic:claude-sonnet-4-5-20250929",
         "anthropic:claude-sonnet-4-5",
+        "anthropic:claude-sonnet-4-6",
         "bedrock:amazon.titan-text-express-v1",
         "bedrock:amazon.titan-text-lite-v1",
         "bedrock:amazon.titan-tg1-large",
@@ -45,6 +47,7 @@ KnownModelName = TypeAliasType(
         "bedrock:anthropic.claude-opus-4-20250514-v1:0",
         "bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
         "bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "bedrock:anthropic.claude-sonnet-4-6",
         "bedrock:anthropic.claude-v2:1",
         "bedrock:anthropic.claude-v2",
         "bedrock:cohere.command-light-text-v14",
@@ -54,6 +57,7 @@ KnownModelName = TypeAliasType(
         "bedrock:eu.anthropic.claude-haiku-4-5-20251001-v1:0",
         "bedrock:eu.anthropic.claude-sonnet-4-20250514-v1:0",
         "bedrock:eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "bedrock:eu.anthropic.claude-sonnet-4-6",
         "bedrock:global.anthropic.claude-opus-4-5-20251101-v1:0",
         "bedrock:meta.llama3-1-405b-instruct-v1:0",
         "bedrock:meta.llama3-1-70b-instruct-v1:0",
@@ -79,6 +83,7 @@ KnownModelName = TypeAliasType(
         "bedrock:us.anthropic.claude-opus-4-20250514-v1:0",
         "bedrock:us.anthropic.claude-sonnet-4-20250514-v1:0",
         "bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "bedrock:us.anthropic.claude-sonnet-4-6",
         "bedrock:us.meta.llama3-1-70b-instruct-v1:0",
         "bedrock:us.meta.llama3-1-8b-instruct-v1:0",
         "bedrock:us.meta.llama3-2-11b-instruct-v1:0",
@@ -91,7 +96,9 @@ KnownModelName = TypeAliasType(
         "cerebras:llama3.1-8b",
         "cerebras:qwen-3-235b-a22b-instruct-2507",
         "cerebras:qwen-3-32b",
+        "cerebras:qwen-3-coder-480b",
         "cerebras:zai-glm-4.6",
+        "cerebras:zai-glm-4.7",
         "cohere:c4ai-aya-expanse-32b",
         "cohere:c4ai-aya-expanse-8b",
         "cohere:command-nightly",
@@ -116,10 +123,12 @@ KnownModelName = TypeAliasType(
         "gateway/anthropic:claude-opus-4-20250514",
         "gateway/anthropic:claude-opus-4-5-20251101",
         "gateway/anthropic:claude-opus-4-5",
+        "gateway/anthropic:claude-opus-4-6",
         "gateway/anthropic:claude-sonnet-4-0",
         "gateway/anthropic:claude-sonnet-4-20250514",
         "gateway/anthropic:claude-sonnet-4-5-20250929",
         "gateway/anthropic:claude-sonnet-4-5",
+        "gateway/anthropic:claude-sonnet-4-6",
         "gateway/bedrock:amazon.titan-text-express-v1",
         "gateway/bedrock:amazon.titan-text-lite-v1",
         "gateway/bedrock:amazon.titan-tg1-large",
@@ -135,6 +144,7 @@ KnownModelName = TypeAliasType(
         "gateway/bedrock:anthropic.claude-opus-4-20250514-v1:0",
         "gateway/bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
         "gateway/bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "gateway/bedrock:anthropic.claude-sonnet-4-6",
         "gateway/bedrock:anthropic.claude-v2:1",
         "gateway/bedrock:anthropic.claude-v2",
         "gateway/bedrock:cohere.command-light-text-v14",
@@ -144,6 +154,7 @@ KnownModelName = TypeAliasType(
         "gateway/bedrock:eu.anthropic.claude-haiku-4-5-20251001-v1:0",
         "gateway/bedrock:eu.anthropic.claude-sonnet-4-20250514-v1:0",
         "gateway/bedrock:eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "gateway/bedrock:eu.anthropic.claude-sonnet-4-6",
         "gateway/bedrock:global.anthropic.claude-opus-4-5-20251101-v1:0",
         "gateway/bedrock:meta.llama3-1-405b-instruct-v1:0",
         "gateway/bedrock:meta.llama3-1-70b-instruct-v1:0",
@@ -169,6 +180,7 @@ KnownModelName = TypeAliasType(
         "gateway/bedrock:us.anthropic.claude-opus-4-20250514-v1:0",
         "gateway/bedrock:us.anthropic.claude-sonnet-4-20250514-v1:0",
         "gateway/bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "gateway/bedrock:us.anthropic.claude-sonnet-4-6",
         "gateway/bedrock:us.meta.llama3-1-70b-instruct-v1:0",
         "gateway/bedrock:us.meta.llama3-1-8b-instruct-v1:0",
         "gateway/bedrock:us.meta.llama3-2-11b-instruct-v1:0",
@@ -187,6 +199,9 @@ KnownModelName = TypeAliasType(
         "gateway/google-vertex:gemini-3-flash-preview",
         "gateway/google-vertex:gemini-3-pro-image-preview",
         "gateway/google-vertex:gemini-3-pro-preview",
+        "gateway/google-vertex:gemini-3.1-flash-image-preview",
+        "gateway/google-vertex:gemini-3.1-flash-lite-preview",
+        "gateway/google-vertex:gemini-3.1-pro-preview",
         "gateway/google-vertex:gemini-flash-latest",
         "gateway/google-vertex:gemini-flash-lite-latest",
         "gateway/groq:llama-3.1-8b-instant",
@@ -270,6 +285,12 @@ KnownModelName = TypeAliasType(
         "gateway/openai:gpt-5.2-pro-2025-12-11",
         "gateway/openai:gpt-5.2-pro",
         "gateway/openai:gpt-5.2",
+        "gateway/openai:gpt-5.3-chat-latest",
+        "gateway/openai:gpt-5.4-mini-2026-03-17",
+        "gateway/openai:gpt-5.4-mini",
+        "gateway/openai:gpt-5.4-nano-2026-03-17",
+        "gateway/openai:gpt-5.4-nano",
+        "gateway/openai:gpt-5.4",
         "gateway/openai:gpt-5",
         "gateway/openai:o1-2024-12-17",
         "gateway/openai:o1-mini-2024-09-12",
@@ -302,6 +323,9 @@ KnownModelName = TypeAliasType(
         "google-gla:gemini-3-flash-preview",
         "google-gla:gemini-3-pro-image-preview",
         "google-gla:gemini-3-pro-preview",
+        "google-gla:gemini-3.1-flash-image-preview",
+        "google-gla:gemini-3.1-flash-lite-preview",
+        "google-gla:gemini-3.1-pro-preview",
         "google-gla:gemini-flash-latest",
         "google-gla:gemini-flash-lite-latest",
         "google-vertex:gemini-2.0-flash-lite",
@@ -315,6 +339,9 @@ KnownModelName = TypeAliasType(
         "google-vertex:gemini-3-flash-preview",
         "google-vertex:gemini-3-pro-image-preview",
         "google-vertex:gemini-3-pro-preview",
+        "google-vertex:gemini-3.1-flash-image-preview",
+        "google-vertex:gemini-3.1-flash-lite-preview",
+        "google-vertex:gemini-3.1-pro-preview",
         "google-vertex:gemini-flash-latest",
         "google-vertex:gemini-flash-lite-latest",
         "grok:grok-2-image-1212",
@@ -472,6 +499,12 @@ KnownModelName = TypeAliasType(
         "openai:gpt-5.2-pro-2025-12-11",
         "openai:gpt-5.2-pro",
         "openai:gpt-5.2",
+        "openai:gpt-5.3-chat-latest",
+        "openai:gpt-5.4-mini-2026-03-17",
+        "openai:gpt-5.4-mini",
+        "openai:gpt-5.4-nano-2026-03-17",
+        "openai:gpt-5.4-nano",
+        "openai:gpt-5.4",
         "openai:gpt-5",
         "openai:o1-2024-12-17",
         "openai:o1-mini-2024-09-12",
@@ -519,9 +552,17 @@ class ModelRequestParameters:
     output_mode: OutputMode = 'text'
     output_object: OutputObjectDefinition | None = None
     output_tools: list[ToolDefinition] = field(default_factory=list[ToolDefinition])
-    prompted_output_template: str | None = None
+    prompted_output_template: str | Literal[False] | None = None
     allow_text_output: bool = True
     allow_image_output: bool = False
+
+    thinking: ThinkingLevel | None = None
+    """Resolved thinking/reasoning configuration for this request.
+
+    `None` means the model should use its default behavior. Set by the base
+    `Model.prepare_request()` from the unified `thinking` field in `ModelSettings`,
+    after checking that the model's profile supports thinking.
+    """
 
     @cached_property
     def tool_defs(self) -> dict[str, ToolDefinition]:
@@ -535,6 +576,16 @@ class ModelRequestParameters:
 
     __repr__ = _utils.dataclasses_no_defaults_repr
 ```
+
+#### thinking
+
+```python
+thinking: ThinkingLevel | None = None
+```
+
+Resolved thinking/reasoning configuration for this request.
+
+`None` means the model should use its default behavior. Set by the base `Model.prepare_request()` from the unified `thinking` field in `ModelSettings`, after checking that the model's profile supports thinking.
 
 ### Model
 
@@ -647,6 +698,16 @@ class Model(ABC):
 
         params = self.customize_request_parameters(model_request_parameters)
 
+        # Resolve unified thinking setting
+        thinking_value = model_settings.get('thinking') if model_settings else None
+        if thinking_value is not None:
+            if self.profile.supports_thinking or self.profile.thinking_always_enabled:
+                if thinking_value is False and self.profile.thinking_always_enabled:
+                    pass  # Silent ignore: model always thinks, can't disable
+                else:
+                    params = replace(params, thinking=thinking_value)
+            # else: silent ignore for unsupported models
+
         if builtin_tools := params.builtin_tools:
             # Deduplicate builtin tools
             params = replace(
@@ -674,7 +735,7 @@ class Model(ABC):
         if (
             params.output_mode == 'prompted'
             or (params.output_mode == 'native' and self.profile.native_output_requires_schema_in_instructions)
-        ) and not params.prompted_output_template:
+        ) and params.prompted_output_template is None:
             params = replace(params, prompted_output_template=self.profile.prompted_output_template)
 
         # Check if output mode is supported
@@ -685,16 +746,36 @@ class Model(ABC):
         if params.allow_image_output and not self.profile.supports_image_output:
             raise UserError('Image output is not supported by this model.')
 
-        # Check if builtin tools are supported
-        if params.builtin_tools:
+        # Check builtin tools and handle fallback swap
+        if params.builtin_tools or any(t.prefer_builtin for t in params.function_tools):
             supported_types = self.profile.supported_builtin_tools
-            unsupported = [tool for tool in params.builtin_tools if not isinstance(tool, tuple(supported_types))]
-            if unsupported:
-                unsupported_names = [type(tool).__name__ for tool in unsupported]
+
+            supported_builtins = [t for t in params.builtin_tools if isinstance(t, tuple(supported_types))]
+            unsupported_builtins = [t for t in params.builtin_tools if not isinstance(t, tuple(supported_types))]
+
+            supported_ids = {t.unique_id for t in supported_builtins}
+            unsupported_ids = {t.unique_id for t in unsupported_builtins}
+            fallback_ids = {t.prefer_builtin for t in params.function_tools if t.prefer_builtin}
+
+            # Error only for unsupported builtins that have no local fallback
+            without_fallback = unsupported_ids - fallback_ids
+            if without_fallback:
+                unsupported_names = [type(t).__name__ for t in unsupported_builtins if t.unique_id in without_fallback]
                 supported_names = [t.__name__ for t in supported_types]
                 raise UserError(
-                    f'Builtin tool(s) {unsupported_names} not supported by this model. Supported: {supported_names}'
+                    f'Builtin tool(s) {unsupported_names} not supported by this model. '
+                    f'Supported: {supported_names}. '
+                    f'To use these tools with this model, provide a local fallback via '
+                    f'BuiltinOrLocalTool(builtin=..., local=...) or the `local` parameter '
+                    f'of the capability (e.g. ImageGeneration(local=my_func)).'
                 )
+
+            # Remove local fallback tools whose preferred builtin IS supported (model handles natively)
+            # Remove unsupported builtins (their local fallbacks stay)
+            function_tools = [
+                t for t in params.function_tools if not t.prefer_builtin or t.prefer_builtin not in supported_ids
+            ]
+            params = replace(params, builtin_tools=supported_builtins, function_tools=function_tools)
 
         return model_settings, params
 
@@ -703,6 +784,11 @@ class Model(ABC):
     def model_name(self) -> str:
         """The model name."""
         raise NotImplementedError()
+
+    @property
+    def model_id(self) -> str:
+        """The fully qualified model name in `'provider:model_name'` format."""
+        return f'{self.system}:{self.model_name}'
 
     @property
     def label(self) -> str:
@@ -1044,6 +1130,16 @@ def prepare_request(
 
     params = self.customize_request_parameters(model_request_parameters)
 
+    # Resolve unified thinking setting
+    thinking_value = model_settings.get('thinking') if model_settings else None
+    if thinking_value is not None:
+        if self.profile.supports_thinking or self.profile.thinking_always_enabled:
+            if thinking_value is False and self.profile.thinking_always_enabled:
+                pass  # Silent ignore: model always thinks, can't disable
+            else:
+                params = replace(params, thinking=thinking_value)
+        # else: silent ignore for unsupported models
+
     if builtin_tools := params.builtin_tools:
         # Deduplicate builtin tools
         params = replace(
@@ -1071,7 +1167,7 @@ def prepare_request(
     if (
         params.output_mode == 'prompted'
         or (params.output_mode == 'native' and self.profile.native_output_requires_schema_in_instructions)
-    ) and not params.prompted_output_template:
+    ) and params.prompted_output_template is None:
         params = replace(params, prompted_output_template=self.profile.prompted_output_template)
 
     # Check if output mode is supported
@@ -1082,16 +1178,36 @@ def prepare_request(
     if params.allow_image_output and not self.profile.supports_image_output:
         raise UserError('Image output is not supported by this model.')
 
-    # Check if builtin tools are supported
-    if params.builtin_tools:
+    # Check builtin tools and handle fallback swap
+    if params.builtin_tools or any(t.prefer_builtin for t in params.function_tools):
         supported_types = self.profile.supported_builtin_tools
-        unsupported = [tool for tool in params.builtin_tools if not isinstance(tool, tuple(supported_types))]
-        if unsupported:
-            unsupported_names = [type(tool).__name__ for tool in unsupported]
+
+        supported_builtins = [t for t in params.builtin_tools if isinstance(t, tuple(supported_types))]
+        unsupported_builtins = [t for t in params.builtin_tools if not isinstance(t, tuple(supported_types))]
+
+        supported_ids = {t.unique_id for t in supported_builtins}
+        unsupported_ids = {t.unique_id for t in unsupported_builtins}
+        fallback_ids = {t.prefer_builtin for t in params.function_tools if t.prefer_builtin}
+
+        # Error only for unsupported builtins that have no local fallback
+        without_fallback = unsupported_ids - fallback_ids
+        if without_fallback:
+            unsupported_names = [type(t).__name__ for t in unsupported_builtins if t.unique_id in without_fallback]
             supported_names = [t.__name__ for t in supported_types]
             raise UserError(
-                f'Builtin tool(s) {unsupported_names} not supported by this model. Supported: {supported_names}'
+                f'Builtin tool(s) {unsupported_names} not supported by this model. '
+                f'Supported: {supported_names}. '
+                f'To use these tools with this model, provide a local fallback via '
+                f'BuiltinOrLocalTool(builtin=..., local=...) or the `local` parameter '
+                f'of the capability (e.g. ImageGeneration(local=my_func)).'
             )
+
+        # Remove local fallback tools whose preferred builtin IS supported (model handles natively)
+        # Remove unsupported builtins (their local fallbacks stay)
+        function_tools = [
+            t for t in params.function_tools if not t.prefer_builtin or t.prefer_builtin not in supported_ids
+        ]
+        params = replace(params, builtin_tools=supported_builtins, function_tools=function_tools)
 
     return model_settings, params
 ```
@@ -1103,6 +1219,14 @@ model_name: str
 ```
 
 The model name.
+
+#### model_id
+
+```python
+model_id: str
+```
+
+The fully qualified model name in `'provider:model_name'` format.
 
 #### label
 

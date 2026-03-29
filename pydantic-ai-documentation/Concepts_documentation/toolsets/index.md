@@ -1,6 +1,6 @@
 # Toolsets
 
-A toolset represents a collection of [tools](https://ai.pydantic.dev/tools/index.md) that can be registered with an agent in one go. They can be reused by different agents, swapped out at runtime or during testing, and composed in order to dynamically filter which tools are available, modify tool definitions, or change tool execution behavior. A toolset can contain locally defined functions, depend on an external service to provide them, or implement custom logic to list available tools and handle them being called.
+A toolset represents a collection of [tools](https://ai.pydantic.dev/tools/index.md) that can be registered with an agent in one go. They can be reused by different agents, swapped out at runtime or during testing, and composed in order to dynamically filter which tools are available, modify tool definitions, or change tool execution behavior. A toolset can contain locally defined functions, depend on an external service to provide them, or implement custom logic to list available tools and handle them being called. Toolsets can also be provided via [capabilities](https://ai.pydantic.dev/capabilities/index.md), which bundle tools with hooks, instructions, and model settings.
 
 Toolsets are used (among many other things) to define [MCP servers](https://ai.pydantic.dev/mcp/client/index.md) available to an agent. Pydantic AI includes many kinds of toolsets which are described below, and you can define a [custom toolset](#building-a-custom-toolset) by inheriting from the AbstractToolset class.
 
@@ -61,13 +61,14 @@ with agent.override(toolsets=[override_toolset]):
 
 As the name suggests, a FunctionToolset makes locally defined functions available as tools.
 
-Functions can be added as tools in three different ways:
+Functions can be added as tools in four different ways:
 
-- via the @toolset.tool decorator
+- via the @toolset.tool decorator — for tools that need access to the agent context
+- via the @toolset.tool_plain decorator — for tools that do not need access to the agent context
 - via the tools keyword argument to the constructor which can take either plain functions, or instances of Tool
 - via the toolset.add_function() and toolset.add_tool() methods which can take a plain function or an instance of Tool respectively
 
-Functions registered in any of these ways can define an initial `ctx: RunContext` argument in order to receive the agent run context. The `add_function()` and `add_tool()` methods can also be used from a tool function to dynamically register new tools during a run to be available in future run steps.
+The `add_function()` and `add_tool()` methods can also be used from a tool function to dynamically register new tools during a run to be available in future run steps.
 
 function_toolset.py
 
@@ -479,12 +480,12 @@ from pydantic_ai import Agent, FunctionToolset
 toolset = FunctionToolset()
 
 
-@toolset.tool
+@toolset.tool_plain
 def get_default_language():
     return 'en-US'
 
 
-@toolset.tool
+@toolset.tool_plain
 def get_user_name():
     return 'David'
 
@@ -494,7 +495,7 @@ class PersonalizedGreeting(BaseModel):
     language_code: str
 
 
-agent = Agent('gateway/openai:gpt-5', toolsets=[toolset], output_type=PersonalizedGreeting)
+agent = Agent('gateway/openai:gpt-5.2', toolsets=[toolset], output_type=PersonalizedGreeting)
 
 result = agent.run_sync('Greet the user in a personalized way')
 print(repr(result.output))
@@ -511,12 +512,12 @@ from pydantic_ai import Agent, FunctionToolset
 toolset = FunctionToolset()
 
 
-@toolset.tool
+@toolset.tool_plain
 def get_default_language():
     return 'en-US'
 
 
-@toolset.tool
+@toolset.tool_plain
 def get_user_name():
     return 'David'
 
@@ -526,7 +527,7 @@ class PersonalizedGreeting(BaseModel):
     language_code: str
 
 
-agent = Agent('openai:gpt-5', toolsets=[toolset], output_type=PersonalizedGreeting)
+agent = Agent('openai:gpt-5.2', toolsets=[toolset], output_type=PersonalizedGreeting)
 
 result = agent.run_sync('Greet the user in a personalized way')
 print(repr(result.output))
@@ -713,9 +714,26 @@ print([t.name for t in test_model.last_model_request_parameters.function_tools])
 
 To define a fully custom toolset with its own logic to list available tools and handle them being called, you can subclass AbstractToolset and implement the get_tools() and call_tool() methods.
 
-If you want to reuse a network connection or session across tool listings and calls during an agent run, you can implement __aenter__() and __aexit__().
+Tip
+
+If your toolset also needs to provide instructions, model settings, or hooks, consider building a [custom capability](https://ai.pydantic.dev/capabilities/#building-custom-capabilities) instead.
+
+The toolset lifecycle provides hooks for managing state at different scopes:
+
+- for_run(): Called once before each agent run. Return a fresh instance for per-run state isolation (e.g. resetting counters, creating a new session). The framework enters and exits the returned instance.
+- for_run_step(): Called at the start of each run step. Return a modified instance for per-step state transitions. If managing inner toolset transitions (e.g. swapping one toolset for another), you are responsible for the inner lifecycle (exiting the old, entering the new).
+- __aenter__() and __aexit__(): Set up and tear down resources (e.g. network connections) that should live for the duration of the agent run.
+
+### Per-run and per-step lifecycle
+
+Toolsets support lifecycle hooks for per-run isolation and per-step state management:
+
+- for_run(ctx) -- called once per agent run, before `__aenter__`. Return a fresh instance to isolate state between runs. Default: returns `self`.
+- for_run_step(ctx) -- called at the start of each run step. Manage internal transitions (e.g. refreshing tool availability) in-place. Default: returns `self`.
 
 ## Third-Party Toolsets
+
+Third-party toolsets can also be wrapped as [capabilities](https://ai.pydantic.dev/capabilities/index.md), which bundle tools with hooks, instructions, and model settings. See [Extensibility](https://ai.pydantic.dev/extensibility/index.md) for the full ecosystem.
 
 ### MCP Servers
 
@@ -766,7 +784,7 @@ from pydantic_ai.ext.langchain import LangChainToolset
 toolkit = SlackToolkit()
 toolset = LangChainToolset(toolkit.get_tools())
 
-agent = Agent('gateway/openai:gpt-5', toolsets=[toolset])
+agent = Agent('gateway/openai:gpt-5.2', toolsets=[toolset])
 # ...
 ```
 
@@ -779,7 +797,7 @@ from pydantic_ai.ext.langchain import LangChainToolset
 toolkit = SlackToolkit()
 toolset = LangChainToolset(toolkit.get_tools())
 
-agent = Agent('openai:gpt-5', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 # ...
 ```
 
@@ -805,7 +823,7 @@ toolset = ACIToolset(
     linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),
 )
 
-agent = Agent('gateway/openai:gpt-5', toolsets=[toolset])
+agent = Agent('gateway/openai:gpt-5.2', toolsets=[toolset])
 ```
 
 ```python
@@ -822,5 +840,5 @@ toolset = ACIToolset(
     linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),
 )
 
-agent = Agent('openai:gpt-5', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 ```

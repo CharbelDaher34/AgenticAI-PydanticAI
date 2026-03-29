@@ -2,7 +2,7 @@ Small but complete example of using Pydantic AI to build a support agent for a b
 
 Demonstrates:
 
-- [dynamic system prompt](https://ai.pydantic.dev/agents/#system-prompts)
+- [dynamic system prompt](https://ai.pydantic.dev/agent/#system-prompts)
 - [structured `output_type`](https://ai.pydantic.dev/output/#structured-output)
 - [tools](https://ai.pydantic.dev/tools/index.md)
 
@@ -18,7 +18,7 @@ python -m pydantic_ai_examples.bank_support
 uv run -m pydantic_ai_examples.bank_support
 ```
 
-(or `PYDANTIC_AI_MODEL=gemini-2.5-flash ...`)
+(or `PYDANTIC_AI_MODEL=gemini-3-flash-preview ...`)
 
 ## Example Code
 
@@ -78,7 +78,7 @@ class SupportOutput(BaseModel):
 
 
 support_agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=SupportDependencies,
     output_type=SupportOutput,
     instructions=(
@@ -184,7 +184,7 @@ class SupportOutput(BaseModel):
 
 
 support_agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=SupportDependencies,
     output_type=SupportOutput,
     instructions=(

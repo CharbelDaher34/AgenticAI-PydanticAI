@@ -476,7 +476,7 @@ class InstrumentedEmbeddingModel(WrapperEmbeddingModel):
                     record_metrics = _record_metrics
 
                     if not span.is_recording():
-                        return
+                        return  # pragma: lax no cover
 
                     attributes_to_set: dict[str, AttributeValue] = {
                         **result.usage.opentelemetry_attributes(),
@@ -3645,6 +3645,7 @@ class CohereEmbeddingModel(EmbeddingModel):
                 max_tokens=settings.get('cohere_max_tokens'),
                 truncate=truncate,
                 request_options=request_options,
+                embedding_types=['float'],  # Always request float embeddings to avoid Cohere SDK deserialization bug
             )
         except ApiError as e:
             if (status_code := e.status_code) and status_code >= 400:
@@ -4315,6 +4316,15 @@ class BedrockEmbeddingSettings(EmbeddingSettings, total=False):
     embedding client only accepts text input.
     """
 
+    bedrock_inference_profile: str
+    """An [inference profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html) ARN to use as the `modelId` in API requests.
+
+    When set, this value is used as the `modelId` in `invoke_model` API calls instead of the
+    base `model_name`. This allows you to pass the base model name (e.g. `'amazon.titan-embed-text-v2:0'`)
+    as `model_name` for detecting model capabilities, while routing requests through an inference profile
+    for cost tracking or cross-region inference.
+    """
+
     # ==================== Concurrency Settings ====================
 
     bedrock_max_concurrency: int
@@ -4422,6 +4432,16 @@ The embedding purpose for Nova models.
 By default, `embed_query()` uses `'GENERIC_RETRIEVAL'` and `embed_documents()` uses `'GENERIC_INDEX'`. Also accepts `'TEXT_RETRIEVAL'`, `'CLASSIFICATION'`, or `'CLUSTERING'`.
 
 Note: Multimodal-specific purposes (`'IMAGE_RETRIEVAL'`, `'VIDEO_RETRIEVAL'`, `'DOCUMENT_RETRIEVAL'`, `'AUDIO_RETRIEVAL'`) are not supported as this embedding client only accepts text input.
+
+#### bedrock_inference_profile
+
+```python
+bedrock_inference_profile: str
+```
+
+An [inference profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles.html) ARN to use as the `modelId` in API requests.
+
+When set, this value is used as the `modelId` in `invoke_model` API calls instead of the base `model_name`. This allows you to pass the base model name (e.g. `'amazon.titan-embed-text-v2:0'`) as `model_name` for detecting model capabilities, while routing requests through an inference profile for cost tracking or cross-region inference.
 
 #### bedrock_max_concurrency
 
@@ -4567,7 +4587,7 @@ class BedrockEmbeddingModel(EmbeddingModel):
     ) -> EmbeddingResult:
         """Embed all inputs in a single batch request."""
         body = self._handler.prepare_request(inputs, input_type, settings)
-        response, input_tokens = await self._invoke_model(body)
+        response, input_tokens = await self._invoke_model(body, settings)
         embeddings, response_id = self._handler.parse_response(response)
 
         return EmbeddingResult(
@@ -4595,7 +4615,7 @@ class BedrockEmbeddingModel(EmbeddingModel):
         async def embed_single(index: int, text: str) -> None:
             async with semaphore:
                 body = self._handler.prepare_request([text], input_type, settings)
-                response, input_tokens = await self._invoke_model(body)
+                response, input_tokens = await self._invoke_model(body, settings)
                 embeddings, _ = self._handler.parse_response(response)
                 results[index] = (embeddings[0], input_tokens)
 
@@ -4615,17 +4635,20 @@ class BedrockEmbeddingModel(EmbeddingModel):
             provider_name=self.system,
         )
 
-    async def _invoke_model(self, body: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    async def _invoke_model(
+        self, body: dict[str, Any], settings: BedrockEmbeddingSettings
+    ) -> tuple[dict[str, Any], int]:
         """Invoke the Bedrock model and return parsed response with token count.
 
         Returns:
             A tuple of (response_body, input_token_count).
         """
+        model_id = settings.get('bedrock_inference_profile') or self._model_name
         try:
             response: InvokeModelResponseTypeDef = await anyio.to_thread.run_sync(
                 functools.partial(
                     self.client.invoke_model,
-                    modelId=self._model_name,
+                    modelId=model_id,
                     body=json.dumps(body),
                     contentType='application/json',
                     accept='application/json',
@@ -4859,7 +4882,7 @@ class VoyageAIEmbeddingModel(EmbeddingModel):
     retrieval, with specialized models for code, finance, and legal domains.
 
     Example:
-    ```python
+    ```python {max_py="3.13"}
     from pydantic_ai.embeddings.voyageai import VoyageAIEmbeddingModel
 
     model = VoyageAIEmbeddingModel('voyage-3.5')
@@ -5150,7 +5173,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
     for available models.
 
     Example:
-    ```python
+    ```python {max_py="3.13"}
     from sentence_transformers import SentenceTransformer
 
     from pydantic_ai.embeddings.sentence_transformers import (
@@ -5788,7 +5811,7 @@ class InstrumentedEmbeddingModel(WrapperEmbeddingModel):
                     record_metrics = _record_metrics
 
                     if not span.is_recording():
-                        return
+                        return  # pragma: lax no cover
 
                     attributes_to_set: dict[str, AttributeValue] = {
                         **result.usage.opentelemetry_attributes(),

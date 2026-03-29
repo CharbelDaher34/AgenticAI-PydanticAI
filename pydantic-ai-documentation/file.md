@@ -11,27 +11,34 @@ applications with Generative AI.
 - [Installation](https://ai.pydantic.dev/install/index.md)
 - [Getting Help](https://ai.pydantic.dev/help/index.md)
 - [Troubleshooting](https://ai.pydantic.dev/troubleshooting/index.md)
+- [Coding Agent Skills](https://ai.pydantic.dev/coding-agent-skills/index.md)
 
 ## Concepts documentation
 
 - [Agent2Agent (A2A)](https://ai.pydantic.dev/a2a/index.md)
-- [Agents](https://ai.pydantic.dev/agents/index.md)
+- [Agents](https://ai.pydantic.dev/agent/index.md)
+- [Agent Specs](https://ai.pydantic.dev/agent-spec/index.md)
 - [Built-in Tools](https://ai.pydantic.dev/builtin-tools/index.md)
+- [Capabilities](https://ai.pydantic.dev/capabilities/index.md)
 - [Dependencies](https://ai.pydantic.dev/dependencies/index.md)
 - [Deferred Tools](https://ai.pydantic.dev/deferred-tools/index.md)
 - [Direct Model Requests](https://ai.pydantic.dev/direct/index.md)
 - [Embeddings](https://ai.pydantic.dev/embeddings/index.md)
+- [Pydantic AI Gateway](https://ai.pydantic.dev/gateway/index.md)
 - [Image, Audio, Video &amp; Document Input](https://ai.pydantic.dev/input/index.md)
 - [Function Tools](https://ai.pydantic.dev/tools/index.md)
 - [Common Tools](https://ai.pydantic.dev/common-tools/index.md)
 - [Output](https://ai.pydantic.dev/output/index.md)
 - [HTTP Request Retries](https://ai.pydantic.dev/retries/index.md)
 - [Messages and chat history](https://ai.pydantic.dev/message-history/index.md)
+- [Extensibility](https://ai.pydantic.dev/extensibility/index.md)
+- [Hooks](https://ai.pydantic.dev/hooks/index.md)
 - [Multi-Agent Patterns](https://ai.pydantic.dev/multi-agent-applications/index.md)
 - [Thinking](https://ai.pydantic.dev/thinking/index.md)
 - [Third-Party Tools](https://ai.pydantic.dev/third-party-tools/index.md)
 - [Advanced Tool Features](https://ai.pydantic.dev/tools-advanced/index.md)
 - [Toolsets](https://ai.pydantic.dev/toolsets/index.md)
+- [Web Chat UI](https://ai.pydantic.dev/web/index.md)
 
 ## Models
 
@@ -52,13 +59,20 @@ applications with Generative AI.
 ## Graphs
 
 - [Overview](https://ai.pydantic.dev/graph/index.md)
+- [Getting Started](https://ai.pydantic.dev/graph/beta/index.md)
+- [Decisions](https://ai.pydantic.dev/graph/beta/decisions/index.md)
+- [Joins & Reducers](https://ai.pydantic.dev/graph/beta/joins/index.md)
+- [Parallel Execution](https://ai.pydantic.dev/graph/beta/parallel/index.md)
+- [Steps](https://ai.pydantic.dev/graph/beta/steps/index.md)
 
 ## API Reference
 
 - [pydantic_ai.ag_ui](https://ai.pydantic.dev/api/ag_ui/index.md)
 - [pydantic_ai.agent](https://ai.pydantic.dev/api/agent/index.md)
 - [pydantic_ai.builtin_tools](https://ai.pydantic.dev/api/builtin_tools/index.md)
+- [pydantic_ai.capabilities](https://ai.pydantic.dev/api/capabilities/index.md)
 - [pydantic_ai.common_tools](https://ai.pydantic.dev/api/common_tools/index.md)
+- [pydantic_ai â€” Concurrency](https://ai.pydantic.dev/api/concurrency/index.md)
 - [pydantic_ai.direct](https://ai.pydantic.dev/api/direct/index.md)
 - [pydantic_ai.durable_exec](https://ai.pydantic.dev/api/durable_exec/index.md)
 - [pydantic_ai.embeddings](https://ai.pydantic.dev/api/embeddings/index.md)
@@ -100,6 +114,7 @@ applications with Generative AI.
 - [pydantic_evals.dataset](https://ai.pydantic.dev/api/pydantic_evals/dataset/index.md)
 - [pydantic_evals.evaluators](https://ai.pydantic.dev/api/pydantic_evals/evaluators/index.md)
 - [pydantic_evals.generation](https://ai.pydantic.dev/api/pydantic_evals/generation/index.md)
+- [pydantic_evals.lifecycle](https://ai.pydantic.dev/api/pydantic_evals/lifecycle/index.md)
 - [pydantic_evals.otel](https://ai.pydantic.dev/api/pydantic_evals/otel/index.md)
 - [pydantic_evals.reporting](https://ai.pydantic.dev/api/pydantic_evals/reporting/index.md)
 - [pydantic_graph.beta](https://ai.pydantic.dev/api/pydantic_graph/beta/index.md)
@@ -121,6 +136,23 @@ applications with Generative AI.
 ## Evals
 
 - [Overview](https://ai.pydantic.dev/evals/index.md)
+- [Core Concepts](https://ai.pydantic.dev/evals/core-concepts/index.md)
+- [Quick Start](https://ai.pydantic.dev/evals/quick-start/index.md)
+- [Built-in Evaluators](https://ai.pydantic.dev/evals/evaluators/built-in/index.md)
+- [Custom Evaluators](https://ai.pydantic.dev/evals/evaluators/custom/index.md)
+- [LLM Judge](https://ai.pydantic.dev/evals/evaluators/llm-judge/index.md)
+- [Overview](https://ai.pydantic.dev/evals/evaluators/overview/index.md)
+- [Report Evaluators](https://ai.pydantic.dev/evals/evaluators/report-evaluators/index.md)
+- [Span-Based](https://ai.pydantic.dev/evals/evaluators/span-based/index.md)
+- [Simple Validation](https://ai.pydantic.dev/evals/examples/simple-validation/index.md)
+- [Concurrency & Performance](https://ai.pydantic.dev/evals/how-to/concurrency/index.md)
+- [Dataset Management](https://ai.pydantic.dev/evals/how-to/dataset-management/index.md)
+- [Dataset Serialization](https://ai.pydantic.dev/evals/how-to/dataset-serialization/index.md)
+- [Case Lifecycle Hooks](https://ai.pydantic.dev/evals/how-to/lifecycle/index.md)
+- [Logfire Integration](https://ai.pydantic.dev/evals/how-to/logfire-integration/index.md)
+- [Metrics & Attributes](https://ai.pydantic.dev/evals/how-to/metrics-attributes/index.md)
+- [Multi-Run Evaluation](https://ai.pydantic.dev/evals/how-to/multi-run/index.md)
+- [Retry Strategies](https://ai.pydantic.dev/evals/how-to/retry-strategies/index.md)
 
 ## Durable Execution
 
@@ -167,3 +199,4 @@ applications with Generative AI.
 - [Stream markdown](https://ai.pydantic.dev/examples/stream-markdown/index.md)
 - [Stream whales](https://ai.pydantic.dev/examples/stream-whales/index.md)
 - [Weather agent](https://ai.pydantic.dev/examples/weather-agent/index.md)
+

@@ -35,14 +35,14 @@ You can then use `GoogleModel` by name (where GLA stands for Generative Language
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/gemini:gemini-2.5-pro')
+agent = Agent('gateway/gemini:gemini-3-pro-preview')
 ...
 ```
 
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('google-gla:gemini-2.5-pro')
+agent = Agent('google-gla:gemini-3-pro-preview')
 ...
 ```
 
@@ -54,7 +54,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 provider = GoogleProvider(api_key='your-api-key')
-model = GoogleModel('gemini-2.5-pro', provider=provider)
+model = GoogleModel('gemini-3-pro-preview', provider=provider)
 agent = Agent(model)
 ...
 ```
@@ -83,14 +83,14 @@ If you have the [`gcloud` CLI](https://cloud.google.com/sdk/gcloud) installed an
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/google-vertex:gemini-2.5-pro')
+agent = Agent('gateway/google-vertex:gemini-3-pro-preview')
 ...
 ```
 
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('google-vertex:gemini-2.5-pro')
+agent = Agent('google-vertex:gemini-3-pro-preview')
 ...
 ```
 
@@ -102,7 +102,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 provider = GoogleProvider(vertexai=True)
-model = GoogleModel('gemini-2.5-pro', provider=provider)
+model = GoogleModel('gemini-3-pro-preview', provider=provider)
 agent = Agent(model)
 ...
 ```
@@ -125,7 +125,7 @@ credentials = service_account.Credentials.from_service_account_file(
     scopes=['https://www.googleapis.com/auth/cloud-platform'],
 )
 provider = GoogleProvider(credentials=credentials, project='your-project-id')
-model = GoogleModel('gemini-2.5-flash', provider=provider)
+model = GoogleModel('gemini-3-flash-preview', provider=provider)
 agent = Agent(model)
 ...
 ```
@@ -145,14 +145,14 @@ You can then use `GoogleModel` in Vertex AI mode by name:
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/google-vertex:gemini-2.5-pro')
+agent = Agent('gateway/google-vertex:gemini-3-pro-preview')
 ...
 ```
 
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('google-vertex:gemini-2.5-pro')
+agent = Agent('google-vertex:gemini-3-pro-preview')
 ...
 ```
 
@@ -164,7 +164,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 provider = GoogleProvider(vertexai=True, api_key='your-api-key')
-model = GoogleModel('gemini-2.5-pro', provider=provider)
+model = GoogleModel('gemini-3-pro-preview', provider=provider)
 agent = Agent(model)
 ...
 ```
@@ -181,7 +181,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 provider = GoogleProvider(vertexai=True, location='asia-east1', project='your-gcp-project-id')
-model = GoogleModel('gemini-2.5-pro', provider=provider)
+model = GoogleModel('gemini-3-pro-preview', provider=provider)
 agent = Agent(model)
 ...
 ```
@@ -222,7 +222,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 custom_http_client = AsyncClient(timeout=30)
 model = GoogleModel(
-    'gemini-2.5-pro',
+    'gemini-3-pro-preview',
     provider=GoogleProvider(api_key='your-api-key', http_client=custom_http_client),
 )
 agent = Agent(model)
@@ -241,7 +241,7 @@ youtube_input.py
 from pydantic_ai import Agent, VideoUrl
 from pydantic_ai.models.google import GoogleModel
 
-agent = Agent(GoogleModel('gemini-2.5-flash'))
+agent = Agent(GoogleModel('gemini-3-flash-preview'))
 result = agent.run_sync(
     [
         'What is this video about?',
@@ -264,7 +264,7 @@ provider = GoogleProvider()
 file = provider.client.files.upload(file='pydantic-ai-logo.png')
 assert file.uri is not None
 
-agent = Agent(GoogleModel('gemini-2.5-flash', provider=provider))
+agent = Agent(GoogleModel('gemini-3-flash-preview', provider=provider))
 result = agent.run_sync(
     [
         'What company is this logo from?',
@@ -297,21 +297,35 @@ settings = GoogleModelSettings(
         }
     ]
 )
-model = GoogleModel('gemini-2.5-pro')
+model = GoogleModel('gemini-3-pro-preview')
 agent = Agent(model, model_settings=settings)
 ...
 ```
 
-### Disable thinking
+### Configure thinking
 
-On models older than Gemini 2.5 Pro, you can disable thinking by setting the `thinking_budget` to `0` on the `google_thinking_config`:
+Gemini 3 models use `thinking_level` to control thinking behavior:
 
 ```python
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
+# Set thinking level for Gemini 3 models
+model_settings = GoogleModelSettings(google_thinking_config={'thinking_level': 'low'})  # 'low' or 'high'
+model = GoogleModel('gemini-3-flash-preview')
+agent = Agent(model, model_settings=model_settings)
+...
+```
+
+For older models (pre-Gemini 3), you can use `thinking_budget` instead:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+
+# Disable thinking on older models by setting budget to 0
 model_settings = GoogleModelSettings(google_thinking_config={'thinking_budget': 0})
-model = GoogleModel('gemini-2.5-flash')
+model = GoogleModel('gemini-2.5-flash')  # Older model
 agent = Agent(model, model_settings=model_settings)
 ...
 ```
@@ -336,9 +350,38 @@ model_settings = GoogleModelSettings(
         }
     ]
 )
-model = GoogleModel('gemini-2.5-flash')
+model = GoogleModel('gemini-3-flash-preview')
 agent = Agent(model, model_settings=model_settings)
 ...
 ```
 
 See the [Gemini API docs](https://ai.google.dev/gemini-api/docs/safety-settings) for more on safety settings.
+
+### Logprobs
+
+You can return logprobs from the model in your response by setting `google_logprobs` and `google_top_logprobs` in the GoogleModelSettings.
+
+This feature is only supported for non-streaming requests and Vertex AI.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.providers.google import GoogleProvider
+
+model_settings = GoogleModelSettings(
+    google_logprobs=True, google_top_logprobs=2,
+)
+
+model = GoogleModel(
+    model_name='gemini-2.5-flash',
+    provider=GoogleProvider(location='europe-west1', vertexai=True),
+)
+agent = Agent(model, model_settings=model_settings)
+
+result = agent.run_sync('Your prompt here')
+# Access logprobs from provider_details
+logprobs = result.response.provider_details.get('logprobs')
+avg_logprobs = result.response.provider_details.get('avg_logprobs')
+```
+
+See the [Google Dev Blog](https://developers.googleblog.com/unlock-gemini-reasoning-with-logprobs-on-vertex-ai/) for more information.

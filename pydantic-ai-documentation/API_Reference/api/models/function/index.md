@@ -15,7 +15,7 @@ from pydantic_ai import Agent
 from pydantic_ai import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 
-my_agent = Agent('gateway/openai:gpt-5')
+my_agent = Agent('gateway/openai:gpt-5.2')
 
 
 async def model_function(
@@ -66,7 +66,7 @@ from pydantic_ai import Agent
 from pydantic_ai import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 
-my_agent = Agent('openai:gpt-5')
+my_agent = Agent('openai:gpt-5.2')
 
 
 async def model_function(

@@ -697,9 +697,14 @@ class MCPServer(AbstractToolset[Any], ABC):
 
     When enabled (default), tools are fetched once and cached until either:
     - The server sends a `notifications/tools/list_changed` notification
-    - The connection is closed
+    - [`MCPServer.__aexit__`][pydantic_ai.mcp.MCPServer.__aexit__] is called (when the last context exits)
 
     Set to `False` for servers that change tools dynamically without sending notifications.
+
+    Note: When using durable execution (Temporal, DBOS), tool definitions are additionally cached
+    at the wrapper level across activities/steps, to avoid redundant MCP connections. This
+    wrapper-level cache is not invalidated by `tools/list_changed` notifications.
+    Set to `False` to disable all caching if tools may change during a workflow.
     """
 
     cache_resources: bool
@@ -707,7 +712,7 @@ class MCPServer(AbstractToolset[Any], ABC):
 
     When enabled (default), resources are fetched once and cached until either:
     - The server sends a `notifications/resources/list_changed` notification
-    - The connection is closed
+    - [`MCPServer.__aexit__`][pydantic_ai.mcp.MCPServer.__aexit__] is called (when the last context exits)
 
     Set to `False` for servers that change resources dynamically without sending notifications.
     """
@@ -837,20 +842,18 @@ class MCPServer(AbstractToolset[Any], ABC):
 
         Tools are cached by default, with cache invalidation on:
         - `notifications/tools/list_changed` notifications from the server
-        - Connection close (cache is cleared in `__aexit__`)
+        - `__aexit__` when the last context exits
 
         Set `cache_tools=False` for servers that change tools without sending notifications.
         """
+        if self.cache_tools and self._cached_tools is not None:
+            return self._cached_tools
+
         async with self:
+            result = await self._client.list_tools()
             if self.cache_tools:
-                if self._cached_tools is not None:
-                    return self._cached_tools
-                result = await self._client.list_tools()
                 self._cached_tools = result.tools
-                return result.tools
-            else:
-                result = await self._client.list_tools()
-                return result.tools
+            return result.tools
 
     async def direct_call_tool(
         self,
@@ -958,27 +961,25 @@ class MCPServer(AbstractToolset[Any], ABC):
 
         Resources are cached by default, with cache invalidation on:
         - `notifications/resources/list_changed` notifications from the server
-        - Connection close (cache is cleared in `__aexit__`)
+        - `__aexit__` when the last context exits
 
         Set `cache_resources=False` for servers that change resources without sending notifications.
 
         Raises:
             MCPError: If the server returns an error.
         """
+        if self.cache_resources and self._cached_resources is not None:
+            return self._cached_resources
+
         async with self:
             if not self.capabilities.resources:
                 return []
             try:
+                result = await self._client.list_resources()
+                resources = [Resource.from_mcp_sdk(r) for r in result.resources]
                 if self.cache_resources:
-                    if self._cached_resources is not None:
-                        return self._cached_resources
-                    result = await self._client.list_resources()
-                    resources = [Resource.from_mcp_sdk(r) for r in result.resources]
                     self._cached_resources = resources
-                    return resources
-                else:
-                    result = await self._client.list_resources()
-                    return [Resource.from_mcp_sdk(r) for r in result.resources]
+                return resources
             except mcp_exceptions.McpError as e:
                 raise MCPError.from_mcp_sdk(e) from e
 
@@ -1071,9 +1072,9 @@ class MCPServer(AbstractToolset[Any], ABC):
         return self
 
     async def __aexit__(self, *args: Any) -> bool | None:
-        if self._running_count == 0:
-            raise ValueError('MCPServer.__aexit__ called more times than __aenter__')
         async with self._enter_lock:
+            if self._running_count == 0:
+                raise ValueError('MCPServer.__aexit__ called more times than __aenter__')
             self._running_count -= 1
             if self._running_count == 0 and self._exit_stack is not None:
                 await self._exit_stack.aclose()
@@ -1274,9 +1275,11 @@ Whether to cache the list of tools.
 When enabled (default), tools are fetched once and cached until either:
 
 - The server sends a `notifications/tools/list_changed` notification
-- The connection is closed
+- MCPServer.__aexit__ is called (when the last context exits)
 
 Set to `False` for servers that change tools dynamically without sending notifications.
+
+Note: When using durable execution (Temporal, DBOS), tool definitions are additionally cached at the wrapper level across activities/steps, to avoid redundant MCP connections. This wrapper-level cache is not invalidated by `tools/list_changed` notifications. Set to `False` to disable all caching if tools may change during a workflow.
 
 #### cache_resources
 
@@ -1289,7 +1292,7 @@ Whether to cache the list of resources.
 When enabled (default), resources are fetched once and cached until either:
 
 - The server sends a `notifications/resources/list_changed` notification
-- The connection is closed
+- MCPServer.__aexit__ is called (when the last context exits)
 
 Set to `False` for servers that change resources dynamically without sending notifications.
 
@@ -1361,7 +1364,7 @@ Retrieve tools that are currently active on the server.
 Tools are cached by default, with cache invalidation on:
 
 - `notifications/tools/list_changed` notifications from the server
-- Connection close (cache is cleared in `__aexit__`)
+- `__aexit__` when the last context exits
 
 Set `cache_tools=False` for servers that change tools without sending notifications.
 
@@ -1373,20 +1376,18 @@ async def list_tools(self) -> list[mcp_types.Tool]:
 
     Tools are cached by default, with cache invalidation on:
     - `notifications/tools/list_changed` notifications from the server
-    - Connection close (cache is cleared in `__aexit__`)
+    - `__aexit__` when the last context exits
 
     Set `cache_tools=False` for servers that change tools without sending notifications.
     """
+    if self.cache_tools and self._cached_tools is not None:
+        return self._cached_tools
+
     async with self:
+        result = await self._client.list_tools()
         if self.cache_tools:
-            if self._cached_tools is not None:
-                return self._cached_tools
-            result = await self._client.list_tools()
             self._cached_tools = result.tools
-            return result.tools
-        else:
-            result = await self._client.list_tools()
-            return result.tools
+        return result.tools
 ```
 
 #### direct_call_tool
@@ -1495,7 +1496,7 @@ Retrieve resources that are currently present on the server.
 Resources are cached by default, with cache invalidation on:
 
 - `notifications/resources/list_changed` notifications from the server
-- Connection close (cache is cleared in `__aexit__`)
+- `__aexit__` when the last context exits
 
 Set `cache_resources=False` for servers that change resources without sending notifications.
 
@@ -1513,27 +1514,25 @@ async def list_resources(self) -> list[Resource]:
 
     Resources are cached by default, with cache invalidation on:
     - `notifications/resources/list_changed` notifications from the server
-    - Connection close (cache is cleared in `__aexit__`)
+    - `__aexit__` when the last context exits
 
     Set `cache_resources=False` for servers that change resources without sending notifications.
 
     Raises:
         MCPError: If the server returns an error.
     """
+    if self.cache_resources and self._cached_resources is not None:
+        return self._cached_resources
+
     async with self:
         if not self.capabilities.resources:
             return []
         try:
+            result = await self._client.list_resources()
+            resources = [Resource.from_mcp_sdk(r) for r in result.resources]
             if self.cache_resources:
-                if self._cached_resources is not None:
-                    return self._cached_resources
-                result = await self._client.list_resources()
-                resources = [Resource.from_mcp_sdk(r) for r in result.resources]
                 self._cached_resources = resources
-                return resources
-            else:
-                result = await self._client.list_resources()
-                return [Resource.from_mcp_sdk(r) for r in result.resources]
+            return resources
         except mcp_exceptions.McpError as e:
             raise MCPError.from_mcp_sdk(e) from e
 ```
@@ -1726,7 +1725,7 @@ from pydantic_ai.mcp import MCPServerStdio
 server = MCPServerStdio(  # (1)!
     'uv', args=['run', 'mcp-run-python', 'stdio'], timeout=10
 )
-agent = Agent('openai:gpt-4o', toolsets=[server])
+agent = Agent('openai:gpt-5.2', toolsets=[server])
 ```
 
 1. See [MCP Run Python](https://github.com/pydantic/mcp-run-python) for more information.
@@ -1752,7 +1751,7 @@ class MCPServerStdio(MCPServer):
     server = MCPServerStdio(  # (1)!
         'uv', args=['run', 'mcp-run-python', 'stdio'], timeout=10
     )
-    agent = Agent('openai:gpt-4o', toolsets=[server])
+    agent = Agent('openai:gpt-5.2', toolsets=[server])
     ```
 
     1. See [MCP Run Python](https://github.com/pydantic/mcp-run-python) for more information.
@@ -2081,7 +2080,7 @@ from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerSSE
 
 server = MCPServerSSE('http://localhost:3001/sse')
-agent = Agent('openai:gpt-4o', toolsets=[server])
+agent = Agent('openai:gpt-5.2', toolsets=[server])
 ```
 
 Source code in `pydantic_ai_slim/pydantic_ai/mcp.py`
@@ -2103,7 +2102,7 @@ class MCPServerSSE(_MCPServerHTTP):
     from pydantic_ai.mcp import MCPServerSSE
 
     server = MCPServerSSE('http://localhost:3001/sse')
-    agent = Agent('openai:gpt-4o', toolsets=[server])
+    agent = Agent('openai:gpt-5.2', toolsets=[server])
     ```
     """
 
@@ -2190,7 +2189,7 @@ from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerHTTP
 
 server = MCPServerHTTP('http://localhost:3001/sse')
-agent = Agent('openai:gpt-4o', toolsets=[server])
+agent = Agent('openai:gpt-5.2', toolsets=[server])
 ```
 
 Source code in `pydantic_ai_slim/pydantic_ai/mcp.py`
@@ -2213,7 +2212,7 @@ class MCPServerHTTP(MCPServerSSE):
     from pydantic_ai.mcp import MCPServerHTTP
 
     server = MCPServerHTTP('http://localhost:3001/sse')
-    agent = Agent('openai:gpt-4o', toolsets=[server])
+    agent = Agent('openai:gpt-5.2', toolsets=[server])
     ```
     """
 ````
@@ -2237,7 +2236,7 @@ from pydantic_ai import Agent
 from pydantic_ai.mcp import MCPServerStreamableHTTP
 
 server = MCPServerStreamableHTTP('http://localhost:8000/mcp')
-agent = Agent('openai:gpt-4o', toolsets=[server])
+agent = Agent('openai:gpt-5.2', toolsets=[server])
 ```
 
 Source code in `pydantic_ai_slim/pydantic_ai/mcp.py`
@@ -2259,7 +2258,7 @@ class MCPServerStreamableHTTP(_MCPServerHTTP):
     from pydantic_ai.mcp import MCPServerStreamableHTTP
 
     server = MCPServerStreamableHTTP('http://localhost:8000/mcp')
-    agent = Agent('openai:gpt-4o', toolsets=[server])
+    agent = Agent('openai:gpt-5.2', toolsets=[server])
     ```
     """
 

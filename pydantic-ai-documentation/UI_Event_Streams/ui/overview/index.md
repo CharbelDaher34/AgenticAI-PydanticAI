@@ -1,6 +1,6 @@
 # UI Event Streams
 
-If you're building a chat app or other interactive frontend for an AI agent, your backend will need to receive agent run input (like a chat message or complete [message history](https://ai.pydantic.dev/message-history/index.md)) from the frontend, and will need to stream the [agent's events](https://ai.pydantic.dev/agents/#streaming-all-events) (like text, thinking, and tool calls) to the frontend so that the user knows what's happening in real time.
+If you're building a chat app or other interactive frontend for an AI agent, your backend will need to receive agent run input (like a chat message or complete [message history](https://ai.pydantic.dev/message-history/index.md)) from the frontend, and will need to stream the [agent's events](https://ai.pydantic.dev/agent/#streaming-all-events) (like text, thinking, and tool calls) to the frontend so that the user knows what's happening in real time.
 
 While your frontend could use Pydantic AI's ModelRequest and AgentStreamEvent directly, you'll typically want to use a UI event stream protocol that's natively supported by your frontend framework.
 
@@ -13,7 +13,7 @@ These integrations are implemented as subclasses of the abstract UIAdapter class
 
 ## Usage
 
-The protocol-specific UIAdapter subclass (i.e. AGUIAdapter or VercelAIAdapter) is responsible for transforming agent run input received from the frontend into arguments for [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents), running the agent, and then transforming Pydantic AI events into protocol-specific events. The event stream transformation is handled by a protocol-specific UIEventStream subclass, but you typically won't use this directly.
+The protocol-specific UIAdapter subclass (i.e. AGUIAdapter or VercelAIAdapter) is responsible for transforming agent run input received from the frontend into arguments for [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents), running the agent, and then transforming Pydantic AI events into protocol-specific events. The event stream transformation is handled by a protocol-specific UIEventStream subclass, but you typically won't use this directly.
 
 If you're using a Starlette-based web framework like FastAPI, you can use the UIAdapter.dispatch_request() class method from an endpoint function to directly handle a request and return a streaming response of protocol-specific events. This is demonstrated in the next section.
 
@@ -21,7 +21,7 @@ If you're using a web framework not based on Starlette (e.g. Django or Flask) or
 
 ### Usage with Starlette/FastAPI
 
-Besides the request, UIAdapter.dispatch_request() takes the agent, the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents), and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional protocol-specific events.
+Besides the request, UIAdapter.dispatch_request() takes the agent, the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents), and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional protocol-specific events.
 
 Note
 
@@ -37,7 +37,7 @@ from starlette.responses import Response
 from pydantic_ai import Agent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -56,7 +56,7 @@ from starlette.responses import Response
 from pydantic_ai import Agent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -71,7 +71,7 @@ If you're using a web framework not based on Starlette (e.g. Django or Flask) or
 
 1. The UIAdapter.build_run_input() class method takes the request body as bytes and returns a protocol-specific run input object, which you can then pass to the UIAdapter() constructor along with the agent.
    - You can also use the UIAdapter.from_request() class method to build an adapter directly from a Starlette/FastAPI request.
-1. The UIAdapter.run_stream() method runs the agent and returns a stream of protocol-specific events. It supports the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents) and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional protocol-specific events.
+1. The UIAdapter.run_stream() method runs the agent and returns a stream of protocol-specific events. It supports the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents) and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional protocol-specific events.
    - You can also use UIAdapter.run_stream_native() to run the agent and return a stream of Pydantic AI events instead, which can then be transformed into protocol-specific events using UIAdapter.transform_stream().
 1. The UIAdapter.encode_stream() method encodes the stream of protocol-specific events as SSE (HTTP Server-Sent Events) strings, which you can then return as a streaming response.
    - You can also use UIAdapter.streaming_response() to generate a Starlette/FastAPI streaming response directly from the protocol-specific event stream returned by `run_stream()`.
@@ -95,7 +95,7 @@ from pydantic_ai import Agent
 from pydantic_ai.ui import SSE_CONTENT_TYPE
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -134,7 +134,7 @@ from pydantic_ai import Agent
 from pydantic_ai.ui import SSE_CONTENT_TYPE
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 app = FastAPI()
 

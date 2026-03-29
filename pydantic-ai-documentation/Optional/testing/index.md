@@ -39,7 +39,7 @@ from fake_database import DatabaseConn  # (1)!
 from weather_service import WeatherService  # (2)!
 
 weather_agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=WeatherService,
     instructions='Providing a weather forecast at the locations the user provides.',
 )
@@ -88,7 +88,7 @@ from fake_database import DatabaseConn  # (1)!
 from weather_service import WeatherService  # (2)!
 
 weather_agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=WeatherService,
     instructions='Providing a weather forecast at the locations the user provides.',
 )

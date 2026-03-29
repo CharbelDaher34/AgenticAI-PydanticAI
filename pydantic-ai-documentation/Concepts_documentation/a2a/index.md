@@ -11,7 +11,7 @@ We also built a convenience method that expose Pydantic AI agents as A2A servers
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/openai:gpt-5', instructions='Be fun!')
+agent = Agent('gateway/openai:gpt-5.2', instructions='Be fun!')
 app = agent.to_a2a()
 ```
 
@@ -20,7 +20,7 @@ agent_to_a2a.py
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-5', instructions='Be fun!')
+agent = Agent('openai:gpt-5.2', instructions='Be fun!')
 app = agent.to_a2a()
 ```
 
@@ -121,7 +121,7 @@ To expose a Pydantic AI agent as an A2A server, you can use the `to_a2a` method:
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/openai:gpt-5', instructions='Be fun!')
+agent = Agent('gateway/openai:gpt-5.2', instructions='Be fun!')
 app = agent.to_a2a()
 ```
 
@@ -130,7 +130,7 @@ agent_to_a2a.py
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-5', instructions='Be fun!')
+agent = Agent('openai:gpt-5.2', instructions='Be fun!')
 app = agent.to_a2a()
 ```
 

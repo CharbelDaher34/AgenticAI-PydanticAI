@@ -37,7 +37,7 @@ class Vehicle(BaseModel):
 
 
 agent = Agent(
-    'openai:gpt-4o',
+    'openai:gpt-5.2',
     output_type=[
         ToolOutput(Fruit, name='return_fruit'),
         ToolOutput(Vehicle, name='return_vehicle'),
@@ -73,7 +73,7 @@ class ToolOutput(Generic[OutputDataT]):
 
 
     agent = Agent(
-        'openai:gpt-4o',
+        'openai:gpt-5.2',
         output_type=[
             ToolOutput(Fruit, name='return_fruit'),
             ToolOutput(Vehicle, name='return_vehicle'),
@@ -168,7 +168,7 @@ from pydantic_ai import Agent, NativeOutput
 from tool_output import Fruit, Vehicle
 
 agent = Agent(
-    'openai:gpt-4o',
+    'openai:gpt-5.2',
     output_type=NativeOutput(
         [Fruit, Vehicle],
         name='Fruit or vehicle',
@@ -194,7 +194,7 @@ class NativeOutput(Generic[OutputDataT]):
     from tool_output import Fruit, Vehicle
 
     agent = Agent(
-        'openai:gpt-4o',
+        'openai:gpt-5.2',
         output_type=NativeOutput(
             [Fruit, Vehicle],
             name='Fruit or vehicle',
@@ -215,10 +215,11 @@ class NativeOutput(Generic[OutputDataT]):
     """The description of the structured output that will be passed to the model. If not specified and only one output is provided, the docstring of the output type or function will be used."""
     strict: bool | None
     """Whether to use strict mode for the output, if the model supports it."""
-    template: str | None
+    template: str | Literal[False] | None
     """Template for the prompt passed to the model.
     The '{schema}' placeholder will be replaced with the output JSON schema.
     If no template is specified but the model's profile indicates that it requires the schema to be sent as a prompt, the default template specified on the profile will be used.
+    Set to `False` to disable the schema prompt entirely.
     """
 
     def __init__(
@@ -228,7 +229,7 @@ class NativeOutput(Generic[OutputDataT]):
         name: str | None = None,
         description: str | None = None,
         strict: bool | None = None,
-        template: str | None = None,
+        template: str | Literal[False] | None = None,
     ):
         self.outputs = outputs
         self.name = name
@@ -275,10 +276,10 @@ Whether to use strict mode for the output, if the model supports it.
 #### template
 
 ```python
-template: str | None = template
+template: str | Literal[False] | None = template
 ```
 
-Template for the prompt passed to the model. The '{schema}' placeholder will be replaced with the output JSON schema. If no template is specified but the model's profile indicates that it requires the schema to be sent as a prompt, the default template specified on the profile will be used.
+Template for the prompt passed to the model. The '{schema}' placeholder will be replaced with the output JSON schema. If no template is specified but the model's profile indicates that it requires the schema to be sent as a prompt, the default template specified on the profile will be used. Set to `False` to disable the schema prompt entirely.
 
 ### PromptedOutput
 
@@ -304,7 +305,7 @@ class Device(BaseModel):
 
 
 agent = Agent(
-    'openai:gpt-4o',
+    'openai:gpt-5.2',
     output_type=PromptedOutput(
         [Vehicle, Device],
         name='Vehicle or device',
@@ -316,7 +317,7 @@ print(repr(result.output))
 #> Device(name='MacBook', kind='laptop')
 
 agent = Agent(
-    'openai:gpt-4o',
+    'openai:gpt-5.2',
     output_type=PromptedOutput(
         [Vehicle, Device],
         template='Gimme some JSON: {schema}'
@@ -349,7 +350,7 @@ class PromptedOutput(Generic[OutputDataT]):
 
 
     agent = Agent(
-        'openai:gpt-4o',
+        'openai:gpt-5.2',
         output_type=PromptedOutput(
             [Vehicle, Device],
             name='Vehicle or device',
@@ -361,7 +362,7 @@ class PromptedOutput(Generic[OutputDataT]):
     #> Device(name='MacBook', kind='laptop')
 
     agent = Agent(
-        'openai:gpt-4o',
+        'openai:gpt-5.2',
         output_type=PromptedOutput(
             [Vehicle, Device],
             template='Gimme some JSON: {schema}'
@@ -379,10 +380,11 @@ class PromptedOutput(Generic[OutputDataT]):
     """The name of the structured output that will be passed to the model. If not specified and only one output is provided, the name of the output type or function will be used."""
     description: str | None
     """The description that will be passed to the model. If not specified and only one output is provided, the docstring of the output type or function will be used."""
-    template: str | None
+    template: str | Literal[False] | None
     """Template for the prompt passed to the model.
     The '{schema}' placeholder will be replaced with the output JSON schema.
     If not specified, the default template specified on the model's profile will be used.
+    Set to `False` to disable the schema prompt entirely.
     """
 
     def __init__(
@@ -391,7 +393,7 @@ class PromptedOutput(Generic[OutputDataT]):
         *,
         name: str | None = None,
         description: str | None = None,
-        template: str | None = None,
+        template: str | Literal[False] | None = None,
     ):
         self.outputs = outputs
         self.name = name
@@ -429,10 +431,10 @@ The description that will be passed to the model. If not specified and only one 
 #### template
 
 ```python
-template: str | None = template
+template: str | Literal[False] | None = template
 ```
 
-Template for the prompt passed to the model. The '{schema}' placeholder will be replaced with the output JSON schema. If not specified, the default template specified on the model's profile will be used.
+Template for the prompt passed to the model. The '{schema}' placeholder will be replaced with the output JSON schema. If not specified, the default template specified on the model's profile will be used. Set to `False` to disable the schema prompt entirely.
 
 ### TextOutput
 
@@ -451,7 +453,7 @@ def split_into_words(text: str) -> list[str]:
 
 
 agent = Agent(
-    'openai:gpt-4o',
+    'openai:gpt-5.2',
     output_type=TextOutput(split_into_words),
 )
 result = agent.run_sync('Who was Albert Einstein?')
@@ -476,7 +478,7 @@ class TextOutput(Generic[OutputDataT]):
 
 
     agent = Agent(
-        'openai:gpt-4o',
+        'openai:gpt-5.2',
         output_type=TextOutput(split_into_words),
     )
     result = agent.run_sync('Who was Albert Einstein?')
@@ -533,7 +535,7 @@ schema = {
     'required': ['name', 'age']
 }
 
-agent = Agent('openai:gpt-4o', output_type=StructuredDict(schema))
+agent = Agent('openai:gpt-5.2', output_type=StructuredDict(schema))
 result = agent.run_sync('Create a person')
 print(result.output)
 #> {'name': 'John Doe', 'age': 30}
@@ -565,7 +567,7 @@ def StructuredDict(
         'required': ['name', 'age']
     }
 
-    agent = Agent('openai:gpt-4o', output_type=StructuredDict(schema))
+    agent = Agent('openai:gpt-5.2', output_type=StructuredDict(schema))
     result = agent.run_sync('Create a person')
     print(result.output)
     #> {'name': 'John Doe', 'age': 30}

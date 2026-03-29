@@ -4,7 +4,7 @@ Demonstrates:
 
 - [streaming structured output](https://ai.pydantic.dev/output/#streaming-structured-output)
 
-This script streams structured responses from GPT-4 about whales, validates the data and displays it as a dynamic table using [`rich`](https://github.com/Textualize/rich) as the data is received.
+This script streams structured responses about whales, validates the data and displays it as a dynamic table using [`rich`](https://github.com/Textualize/rich) as the data is received.
 
 ## Running the Example
 
@@ -27,7 +27,7 @@ Should give an output like this:
 ```python
 """Information about whales — an example of streamed structured response validation.
 
-This script streams structured responses from GPT-4 about whales, validates the data
+This script streams structured responses about whales, validates the data
 and displays it as a dynamic table using Rich as the data is received.
 
 Run with:
@@ -66,7 +66,7 @@ class Whale(TypedDict):
     description: NotRequired[Annotated[str, Field(description='Short Description')]]
 
 
-agent = Agent('gateway/openai:gpt-4', output_type=list[Whale])
+agent = Agent('gateway/openai:gpt-5.2', output_type=list[Whale])
 
 
 async def main():
@@ -81,7 +81,7 @@ async def main():
             async for whales in result.stream_output(debounce_by=0.01):
                 table = Table(
                     title='Species of Whale',
-                    caption='Streaming Structured responses from GPT-4',
+                    caption='Streaming Structured responses from OpenAI',
                     width=120,
                 )
                 table.add_column('ID', justify='right')
@@ -114,7 +114,7 @@ if __name__ == '__main__':
 ```python
 """Information about whales — an example of streamed structured response validation.
 
-This script streams structured responses from GPT-4 about whales, validates the data
+This script streams structured responses about whales, validates the data
 and displays it as a dynamic table using Rich as the data is received.
 
 Run with:
@@ -153,7 +153,7 @@ class Whale(TypedDict):
     description: NotRequired[Annotated[str, Field(description='Short Description')]]
 
 
-agent = Agent('openai:gpt-4', output_type=list[Whale])
+agent = Agent('openai:gpt-5.2', output_type=list[Whale])
 
 
 async def main():
@@ -168,7 +168,7 @@ async def main():
             async for whales in result.stream_output(debounce_by=0.01):
                 table = Table(
                     title='Species of Whale',
-                    caption='Streaming Structured responses from GPT-4',
+                    caption='Streaming Structured responses from OpenAI',
                     width=120,
                 )
                 table.add_column('ID', justify='right')

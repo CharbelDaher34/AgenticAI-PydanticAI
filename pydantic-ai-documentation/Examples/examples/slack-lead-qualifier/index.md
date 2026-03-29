@@ -215,7 +215,7 @@ class Analysis(BaseModel):
 
 Now it's time to get into Pydantic AI and define the agent that will do the actual analysis!
 
-We specify the model we'll use (`openai:gpt-5`), provide [instructions](https://ai.pydantic.dev/agents/#instructions), give the agent access to the [DuckDuckGo search tool](https://ai.pydantic.dev/common-tools/#duckduckgo-search-tool), and tell it to output either an `Analysis` or `None` using the [Native Output](https://ai.pydantic.dev/output/#native-output) structured output mode.
+We specify the model we'll use (`openai:gpt-5`), provide [instructions](https://ai.pydantic.dev/agent/#instructions), give the agent access to the [DuckDuckGo search tool](https://ai.pydantic.dev/common-tools/#duckduckgo-search-tool), and tell it to output either an `Analysis` or `None` using the [Native Output](https://ai.pydantic.dev/output/#native-output) structured output mode.
 
 The real meat of the app is in the instructions that tell the agent how to evaluate each new Slack member. If you plan to use this app yourself, you'll of course want to modify them to your own situation.
 
@@ -230,7 +230,7 @@ from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 ...
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     instructions=dedent(
         """
         When a new person joins our public Slack, please put together a brief snapshot so we can be most useful to them.
@@ -272,7 +272,7 @@ from pydantic_ai.common_tools.duckduckgo import duckduckgo_search_tool
 ...
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     instructions=dedent(
         """
         When a new person joins our public Slack, please put together a brief snapshot so we can be most useful to them.

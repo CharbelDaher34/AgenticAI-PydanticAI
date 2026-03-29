@@ -1,5 +1,59 @@
 # pydantic_ai.models.fallback
 
+### ExceptionHandler
+
+```python
+ExceptionHandler = (
+    Callable[[Exception], Awaitable[bool]]
+    | Callable[[Exception], bool]
+)
+```
+
+A sync or async callable that decides whether an exception should trigger fallback.
+
+### ResponseHandler
+
+```python
+ResponseHandler = (
+    Callable[[ModelResponse], Awaitable[bool]]
+    | Callable[[ModelResponse], bool]
+)
+```
+
+A sync or async callable that decides whether a model response should trigger fallback.
+
+### FallbackOn
+
+```python
+FallbackOn = (
+    type[Exception]
+    | tuple[type[Exception], ...]
+    | ExceptionHandler
+    | ResponseHandler
+    | Sequence[
+        type[Exception] | ExceptionHandler | ResponseHandler
+    ]
+)
+```
+
+The type of the `fallback_on` parameter to FallbackModel.
+
+### ResponseRejected
+
+Bases: `Exception`
+
+Raised within a `FallbackExceptionGroup` when model responses are rejected by a response handler.
+
+Source code in `pydantic_ai_slim/pydantic_ai/models/fallback.py`
+
+```python
+class ResponseRejected(Exception):
+    """Raised within a `FallbackExceptionGroup` when model responses are rejected by a response handler."""
+
+    def __init__(self, rejected_count: int):
+        super().__init__(f'{rejected_count} model response(s) rejected by fallback_on handler')
+```
+
 ### FallbackModel
 
 Bases: `Model`
@@ -21,33 +75,97 @@ class FallbackModel(Model):
     models: list[Model]
 
     _model_name: str = field(repr=False)
-    _fallback_on: Callable[[Exception], bool]
+    _exception_handlers: list[ExceptionHandler] = field(repr=False)
+    _response_handlers: list[ResponseHandler] = field(repr=False)
 
     def __init__(
         self,
         default_model: Model | KnownModelName | str,
         *fallback_models: Model | KnownModelName | str,
-        fallback_on: Callable[[Exception], bool] | tuple[type[Exception], ...] = (ModelAPIError,),
+        fallback_on: FallbackOn = (ModelAPIError,),
     ):
         """Initialize a fallback model instance.
 
         Args:
             default_model: The name or instance of the default model to use.
             fallback_models: The names or instances of the fallback models to use upon failure.
-            fallback_on: A callable or tuple of exceptions that should trigger a fallback.
+            fallback_on: Conditions that trigger fallback to the next model. Accepts:
+
+                - A tuple of exception types: `(ModelAPIError, RateLimitError)`
+                - An exception handler (sync or async): `lambda exc: isinstance(exc, MyError)`
+                - A response handler (sync or async): `def check(r: ModelResponse) -> bool`
+                - A sequence mixing all of the above: `[ModelAPIError, exc_handler, response_handler]`
+
+                Handler type is auto-detected by inspecting type hints on the first parameter.
+                If the first parameter is hinted as `ModelResponse`, it's a response handler.
+                Otherwise (including untyped handlers and lambdas), it's an exception handler.
         """
         super().__init__()
         self.models = [infer_model(default_model), *[infer_model(m) for m in fallback_models]]
 
+        # Parse fallback_on into exception handlers and response handlers
+        self._exception_handlers = []
+        self._response_handlers = []
+        self._parse_fallback_on(fallback_on)
+
+    def _parse_fallback_on(self, fallback_on: FallbackOn) -> None:
+        """Parse the fallback_on parameter into exception and response handlers."""
         if isinstance(fallback_on, tuple):
-            self._fallback_on = _default_fallback_condition_factory(fallback_on)  # pyright: ignore[reportUnknownArgumentType]
+            if fallback_on:
+                # Tuple of exception types (typing guarantees tuple contents are exception types)
+                self._exception_handlers.append(_exception_types_to_handler(fallback_on))  # type: ignore[arg-type]
+        elif _is_exception_type(fallback_on):
+            # Single exception type
+            self._exception_handlers.append(_exception_types_to_handler((fallback_on,)))
+        elif callable(fallback_on):
+            # Single callable - auto-detect by type hints
+            self._add_handler(fallback_on)
+        elif isinstance(fallback_on, Sequence) and not isinstance(fallback_on, (str, bytes)):
+            # Sequence of mixed handlers/types
+            for item in fallback_on:
+                if _is_exception_type(item):
+                    self._exception_handlers.append(_exception_types_to_handler((item,)))
+                elif callable(item):
+                    self._add_handler(item)
+                else:
+                    # Types guarantee all items are exception types or callables
+                    assert_never(item)
         else:
-            self._fallback_on = fallback_on
+            assert_never(fallback_on)  # type: ignore[arg-type]  # pyright can't narrow str/bytes exclusion
+
+        if not self._exception_handlers and not self._response_handlers:
+            raise UserError(
+                'FallbackModel created with empty fallback_on. '
+                'All exceptions will propagate and all responses will be accepted. '
+                'Use fallback_on=(ModelAPIError,) for default behavior.'
+            )
+
+    def _add_handler(self, handler: Callable[..., Any]) -> None:
+        """Add a handler, auto-detecting its type by inspecting type hints."""
+        if _is_response_handler(handler):
+            self._response_handlers.append(handler)
+        else:
+            self._exception_handlers.append(handler)
+
+    async def _should_fallback(self, value: Exception | ModelResponse) -> bool:
+        """Check if any handler wants to trigger fallback."""
+        handlers = self._exception_handlers if isinstance(value, Exception) else self._response_handlers
+        for handler in handlers:
+            # pyright can't narrow handler's param type from the isinstance check on value
+            result = await handler(value) if is_async_callable(handler) else handler(value)  # type: ignore[arg-type]
+            if result:
+                return True
+        return False
 
     @property
     def model_name(self) -> str:
         """The model name."""
         return f'fallback:{",".join(model.model_name for model in self.models)}'
+
+    @property
+    def model_id(self) -> str:
+        """The fully qualified model identifier, combining the wrapped models' IDs."""
+        return f'fallback:{",".join(model.model_id for model in self.models)}'
 
     @property
     def system(self) -> str:
@@ -68,21 +186,26 @@ class FallbackModel(Model):
         In case of failure, raise a FallbackExceptionGroup with all exceptions.
         """
         exceptions: list[Exception] = []
+        rejected_responses: list[ModelResponse] = []
 
         for model in self.models:
             try:
                 _, prepared_parameters = model.prepare_request(model_settings, model_request_parameters)
                 response = await model.request(messages, model_settings, model_request_parameters)
             except Exception as exc:
-                if self._fallback_on(exc):
+                if await self._should_fallback(exc):
                     exceptions.append(exc)
                     continue
                 raise exc
 
+            if await self._should_fallback(response):
+                rejected_responses.append(response)
+                continue
+
             self._set_span_attributes(model, prepared_parameters)
             return response
 
-        raise FallbackExceptionGroup('All models from FallbackModel failed', exceptions)
+        _raise_fallback_exception_group(exceptions, rejected_responses)
 
     @asynccontextmanager
     async def request_stream(
@@ -103,7 +226,7 @@ class FallbackModel(Model):
                         model.request_stream(messages, model_settings, model_request_parameters, run_context)
                     )
                 except Exception as exc:
-                    if self._fallback_on(exc):
+                    if await self._should_fallback(exc):
                         exceptions.append(exc)
                         continue
                     raise exc  # pragma: no cover
@@ -112,7 +235,7 @@ class FallbackModel(Model):
                 yield response
                 return
 
-        raise FallbackExceptionGroup('All models from FallbackModel failed', exceptions)
+        _raise_fallback_exception_group(exceptions, [])
 
     @cached_property
     def profile(self) -> ModelProfile:
@@ -126,7 +249,7 @@ class FallbackModel(Model):
     ) -> tuple[ModelSettings | None, ModelRequestParameters]:
         return model_settings, model_request_parameters
 
-    def _set_span_attributes(self, model: Model, model_request_parameters: ModelRequestParameters):
+    def _set_span_attributes(self, model: Model, model_request_parameters: ModelRequestParameters) -> None:
         with suppress(Exception):
             span = get_current_span()
             if span.is_recording():
@@ -146,10 +269,7 @@ class FallbackModel(Model):
 __init__(
     default_model: Model | KnownModelName | str,
     *fallback_models: Model | KnownModelName | str,
-    fallback_on: (
-        Callable[[Exception], bool]
-        | tuple[type[Exception], ...]
-    ) = (ModelAPIError,)
+    fallback_on: FallbackOn = (ModelAPIError,)
 )
 ```
 
@@ -157,11 +277,11 @@ Initialize a fallback model instance.
 
 Parameters:
 
-| Name              | Type                            | Description                     | Default                                                           |
-| ----------------- | ------------------------------- | ------------------------------- | ----------------------------------------------------------------- |
-| `default_model`   | \`Model                         | KnownModelName                  | str\`                                                             |
-| `fallback_models` | \`Model                         | KnownModelName                  | str\`                                                             |
-| `fallback_on`     | \`Callable\[[Exception], bool\] | tuple\[type[Exception], ...\]\` | A callable or tuple of exceptions that should trigger a fallback. |
+| Name              | Type         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Default            |
+| ----------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `default_model`   | \`Model      | KnownModelName                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | str\`              |
+| `fallback_models` | \`Model      | KnownModelName                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | str\`              |
+| `fallback_on`     | `FallbackOn` | Conditions that trigger fallback to the next model. Accepts: A tuple of exception types: (ModelAPIError, RateLimitError) An exception handler (sync or async): lambda exc: isinstance(exc, MyError) A response handler (sync or async): def check(r: ModelResponse) -> bool A sequence mixing all of the above: [ModelAPIError, exc_handler, response_handler] Handler type is auto-detected by inspecting type hints on the first parameter. If the first parameter is hinted as ModelResponse, it's a response handler. Otherwise (including untyped handlers and lambdas), it's an exception handler. | `(ModelAPIError,)` |
 
 Source code in `pydantic_ai_slim/pydantic_ai/models/fallback.py`
 
@@ -170,22 +290,31 @@ def __init__(
     self,
     default_model: Model | KnownModelName | str,
     *fallback_models: Model | KnownModelName | str,
-    fallback_on: Callable[[Exception], bool] | tuple[type[Exception], ...] = (ModelAPIError,),
+    fallback_on: FallbackOn = (ModelAPIError,),
 ):
     """Initialize a fallback model instance.
 
     Args:
         default_model: The name or instance of the default model to use.
         fallback_models: The names or instances of the fallback models to use upon failure.
-        fallback_on: A callable or tuple of exceptions that should trigger a fallback.
+        fallback_on: Conditions that trigger fallback to the next model. Accepts:
+
+            - A tuple of exception types: `(ModelAPIError, RateLimitError)`
+            - An exception handler (sync or async): `lambda exc: isinstance(exc, MyError)`
+            - A response handler (sync or async): `def check(r: ModelResponse) -> bool`
+            - A sequence mixing all of the above: `[ModelAPIError, exc_handler, response_handler]`
+
+            Handler type is auto-detected by inspecting type hints on the first parameter.
+            If the first parameter is hinted as `ModelResponse`, it's a response handler.
+            Otherwise (including untyped handlers and lambdas), it's an exception handler.
     """
     super().__init__()
     self.models = [infer_model(default_model), *[infer_model(m) for m in fallback_models]]
 
-    if isinstance(fallback_on, tuple):
-        self._fallback_on = _default_fallback_condition_factory(fallback_on)  # pyright: ignore[reportUnknownArgumentType]
-    else:
-        self._fallback_on = fallback_on
+    # Parse fallback_on into exception handlers and response handlers
+    self._exception_handlers = []
+    self._response_handlers = []
+    self._parse_fallback_on(fallback_on)
 ```
 
 #### model_name
@@ -195,6 +324,14 @@ model_name: str
 ```
 
 The model name.
+
+#### model_id
+
+```python
+model_id: str
+```
+
+The fully qualified model identifier, combining the wrapped models' IDs.
 
 #### request
 
@@ -224,21 +361,26 @@ async def request(
     In case of failure, raise a FallbackExceptionGroup with all exceptions.
     """
     exceptions: list[Exception] = []
+    rejected_responses: list[ModelResponse] = []
 
     for model in self.models:
         try:
             _, prepared_parameters = model.prepare_request(model_settings, model_request_parameters)
             response = await model.request(messages, model_settings, model_request_parameters)
         except Exception as exc:
-            if self._fallback_on(exc):
+            if await self._should_fallback(exc):
                 exceptions.append(exc)
                 continue
             raise exc
 
+        if await self._should_fallback(response):
+            rejected_responses.append(response)
+            continue
+
         self._set_span_attributes(model, prepared_parameters)
         return response
 
-    raise FallbackExceptionGroup('All models from FallbackModel failed', exceptions)
+    _raise_fallback_exception_group(exceptions, rejected_responses)
 ```
 
 #### request_stream
@@ -276,7 +418,7 @@ async def request_stream(
                     model.request_stream(messages, model_settings, model_request_parameters, run_context)
                 )
             except Exception as exc:
-                if self._fallback_on(exc):
+                if await self._should_fallback(exc):
                     exceptions.append(exc)
                     continue
                 raise exc  # pragma: no cover
@@ -285,5 +427,5 @@ async def request_stream(
             yield response
             return
 
-    raise FallbackExceptionGroup('All models from FallbackModel failed', exceptions)
+    _raise_fallback_exception_group(exceptions, [])
 ```

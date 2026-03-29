@@ -4,6 +4,72 @@ Thinking (or reasoning) is the process by which a model works through a problem 
 
 This capability is typically disabled by default and depends on the specific model being used. See the sections below for how to enable thinking for each provider.
 
+## Unified thinking settings
+
+The simplest way to enable thinking across any supported provider is the `thinking` field in ModelSettings:
+
+[Learn about Gateway](https://ai.pydantic.dev/gateway) unified_thinking.py
+
+```python
+from pydantic_ai import Agent
+
+agent = Agent('gateway/anthropic:claude-opus-4-6', model_settings={'thinking': 'high'})
+```
+
+unified_thinking.py
+
+```python
+from pydantic_ai import Agent
+
+agent = Agent('anthropic:claude-opus-4-6', model_settings={'thinking': 'high'})
+```
+
+Or using the Thinking capability:
+
+[Learn about Gateway](https://ai.pydantic.dev/gateway) thinking_capability.py
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.capabilities import Thinking
+
+agent = Agent('gateway/anthropic:claude-opus-4-6', capabilities=[Thinking(effort='high')])
+```
+
+thinking_capability.py
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.capabilities import Thinking
+
+agent = Agent('anthropic:claude-opus-4-6', capabilities=[Thinking(effort='high')])
+```
+
+The `thinking` setting accepts:
+
+- `True` — enable thinking with the provider's default effort level
+- `False` — disable thinking (silently ignored on always-on models)
+- `'minimal'` / `'low'` / `'medium'` / `'high'` / `'xhigh'` — enable thinking at a specific effort level (unsupported levels map to the closest available value)
+
+When omitted, the model uses its default behavior. Provider-specific settings (documented in the sections below) take precedence when both are set.
+
+### Provider translation
+
+The unified `thinking` setting maps to each provider's native format:
+
+| Provider              | `thinking=True`                                                  | `thinking='high'`           | Notes                                       |
+| --------------------- | ---------------------------------------------------------------- | --------------------------- | ------------------------------------------- |
+| Anthropic (Opus 4.6+) | `anthropic_thinking={'type': 'adaptive'}`                        | + `anthropic_effort='high'` | Adaptive thinking                           |
+| Anthropic (older)     | `anthropic_thinking={'type': 'enabled', 'budget_tokens': 10000}` | `budget_tokens=16384`       | Budget-based                                |
+| OpenAI                | `reasoning_effort='medium'`                                      | `reasoning_effort='high'`   |                                             |
+| Google (Gemini 3+)    | `include_thoughts=True`                                          | `thinking_level='HIGH'`     |                                             |
+| Google (Gemini 2.5)   | `include_thoughts=True`                                          | `thinking_budget=24576`     |                                             |
+| Groq                  | `reasoning_format='parsed'`                                      | `reasoning_format='parsed'` | Effort ignored                              |
+| OpenRouter            | `reasoning.effort='medium'`                                      | `reasoning.effort='high'`   | Via `extra_body`                            |
+| Cerebras              | *(default)*                                                      | *(default)*                 | Only `thinking=False` → `disable_reasoning` |
+| xAI                   | `reasoning_effort='high'`                                        | `reasoning_effort='high'`   | Only `'low'` and `'high'` supported         |
+| Bedrock (Claude)      | `thinking.type='enabled'`                                        | `budget_tokens=16384`       | No adaptive support                         |
+| Bedrock (OpenAI)      | `reasoning_effort='medium'`                                      | `reasoning_effort='high'`   |                                             |
+
 ## OpenAI
 
 When using the OpenAIChatModel, text output inside `<think>` tags are converted to ThinkingPart objects. You can customize the tags using the thinking_tags field on the [model profile](https://ai.pydantic.dev/models/openai/#model-profile).
@@ -14,9 +80,9 @@ If your provider recommends to send back these custom fields not changed, for ca
 
 ### OpenAI Responses
 
-The OpenAIResponsesModel can generate native thinking parts. To enable this functionality, you need to set the OpenAIResponsesModelSettings.openai_reasoning_effort and OpenAIResponsesModelSettings.openai_reasoning_summary [model settings](https://ai.pydantic.dev/agents/#model-run-settings).
+The OpenAIResponsesModel can generate native thinking parts. To enable this functionality, you need to set the OpenAIResponsesModelSettings.openai_reasoning_effort and OpenAIResponsesModelSettings.openai_reasoning_summary [model settings](https://ai.pydantic.dev/agent/#model-run-settings).
 
-By default, the unique IDs of reasoning, text, and function call parts from the message history are sent to the model, which can result in errors like `"Item 'rs_123' of type 'reasoning' was provided without its required following item."` if the message history you're sending does not match exactly what was received from the Responses API in a previous response, for example if you're using a [history processor](https://ai.pydantic.dev/message-history/#processing-message-history). To disable this, you can disable the OpenAIResponsesModelSettings.openai_send_reasoning_ids [model setting](https://ai.pydantic.dev/agents/#model-run-settings).
+By default, the unique IDs of reasoning, text, and function call parts from the message history are sent to the model, which can result in errors like `"Item 'rs_123' of type 'reasoning' was provided without its required following item."` if the message history you're sending does not match exactly what was received from the Responses API in a previous response, for example if you're using a [history processor](https://ai.pydantic.dev/message-history/#processing-message-history). To disable this, you can disable the OpenAIResponsesModelSettings.openai_send_reasoning_ids [model setting](https://ai.pydantic.dev/agent/#model-run-settings).
 
 openai_thinking_part.py
 
@@ -24,7 +90,7 @@ openai_thinking_part.py
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIResponsesModelSettings
 
-model = OpenAIResponsesModel('gpt-5')
+model = OpenAIResponsesModel('gpt-5.2')
 settings = OpenAIResponsesModelSettings(
     openai_reasoning_effort='low',
     openai_reasoning_summary='detailed',
@@ -39,7 +105,11 @@ Some OpenAI-compatible APIs (such as LM Studio, vLLM, or OpenRouter with gpt-oss
 
 ## Anthropic
 
-To enable thinking, use the AnthropicModelSettings.anthropic_thinking [model setting](https://ai.pydantic.dev/agents/#model-run-settings).
+To enable thinking, use the AnthropicModelSettings.anthropic_thinking [model setting](https://ai.pydantic.dev/agent/#model-run-settings).
+
+Note
+
+Extended thinking (`type: 'enabled'` with `budget_tokens`) is deprecated on `claude-opus-4-6`+. For those models, use [adaptive thinking](#adaptive-thinking--effort) instead.
 
 anthropic_thinking_part.py
 
@@ -47,7 +117,7 @@ anthropic_thinking_part.py
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 
-model = AnthropicModel('claude-sonnet-4-0')
+model = AnthropicModel('claude-sonnet-4-5')
 settings = AnthropicModelSettings(
     anthropic_thinking={'type': 'enabled', 'budget_tokens': 1024},
 )
@@ -55,9 +125,53 @@ agent = Agent(model, model_settings=settings)
 ...
 ```
 
+### Interleaved Thinking
+
+To enable [interleaved thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking), you need to include the beta header in your model settings:
+
+anthropic_interleaved_thinking.py
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+
+model = AnthropicModel('claude-sonnet-4-5')
+settings = AnthropicModelSettings(
+    anthropic_thinking={'type': 'enabled', 'budget_tokens': 10000},
+    extra_headers={'anthropic-beta': 'interleaved-thinking-2025-05-14'},
+)
+agent = Agent(model, model_settings=settings)
+...
+```
+
+### Adaptive Thinking & Effort
+
+Starting with `claude-opus-4-6`, Anthropic supports [adaptive thinking](https://docs.anthropic.com/en/docs/build-with-claude/adaptive-thinking), where the model dynamically decides when and how much to think based on the complexity of each request. This replaces extended thinking (`type: 'enabled'` with `budget_tokens`) which is deprecated on Opus 4.6. Adaptive thinking also automatically enables interleaved thinking.
+
+anthropic_adaptive_thinking.py
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
+
+model = AnthropicModel('claude-opus-4-6')
+settings = AnthropicModelSettings(
+    anthropic_thinking={'type': 'adaptive'},
+    anthropic_effort='high',
+)
+agent = Agent(model, model_settings=settings)
+...
+```
+
+The anthropic_effort setting controls how much effort the model puts into its response (independent of thinking). See the [Anthropic effort docs](https://docs.anthropic.com/en/docs/build-with-claude/effort) for details.
+
+Note
+
+Older models (`claude-sonnet-4-5`, `claude-opus-4-5`, etc.) do not support adaptive thinking and require `{'type': 'enabled', 'budget_tokens': N}` as shown [above](#anthropic).
+
 ## Google
 
-To enable thinking, use the GoogleModelSettings.google_thinking_config [model setting](https://ai.pydantic.dev/agents/#model-run-settings).
+To enable thinking, use the GoogleModelSettings.google_thinking_config [model setting](https://ai.pydantic.dev/agent/#model-run-settings).
 
 google_thinking_part.py
 
@@ -65,7 +179,7 @@ google_thinking_part.py
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
-model = GoogleModel('gemini-2.5-pro')
+model = GoogleModel('gemini-3-pro-preview')
 settings = GoogleModelSettings(google_thinking_config={'include_thoughts': True})
 agent = Agent(model, model_settings=settings)
 ...
@@ -89,7 +203,7 @@ agent = Agent(model, model_settings=settings)
 
 ## Bedrock
 
-Although Bedrock Converse doesn't provide a unified API to enable thinking, you can still use BedrockModelSettings.bedrock_additional_model_requests_fields [model setting](https://ai.pydantic.dev/agents/#model-run-settings) to pass provider-specific configuration:
+Although Bedrock Converse doesn't provide a unified API to enable thinking, you can still use BedrockModelSettings.bedrock_additional_model_requests_fields [model setting](https://ai.pydantic.dev/agent/#model-run-settings) to pass provider-specific configuration:
 
 bedrock_claude_thinking_part.py
 
@@ -152,7 +266,7 @@ Groq supports different formats to receive thinking parts:
 - `"hidden"`: The thinking part is not included in the text content.
 - `"parsed"`: The thinking part has its own structured part in the response which is converted into a ThinkingPart object.
 
-To enable thinking, use the GroqModelSettings.groq_reasoning_format [model setting](https://ai.pydantic.dev/agents/#model-run-settings):
+To enable thinking, use the GroqModelSettings.groq_reasoning_format [model setting](https://ai.pydantic.dev/agent/#model-run-settings):
 
 groq_thinking_part.py
 
@@ -168,7 +282,7 @@ agent = Agent(model, model_settings=settings)
 
 ## OpenRouter
 
-To enable thinking, use the OpenRouterModelSettings.openrouter_reasoning [model setting](https://ai.pydantic.dev/agents/#model-run-settings).
+To enable thinking, use the OpenRouterModelSettings.openrouter_reasoning [model setting](https://ai.pydantic.dev/agent/#model-run-settings).
 
 openrouter_thinking_part.py
 
@@ -176,7 +290,7 @@ openrouter_thinking_part.py
 from pydantic_ai import Agent
 from pydantic_ai.models.openrouter import OpenRouterModel, OpenRouterModelSettings
 
-model = OpenRouterModel('openai/gpt-5')
+model = OpenRouterModel('openai/gpt-5.2')
 settings = OpenRouterModelSettings(openrouter_reasoning={'effort': 'high'})
 agent = Agent(model, model_settings=settings)
 ...

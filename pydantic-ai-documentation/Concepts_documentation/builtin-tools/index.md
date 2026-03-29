@@ -22,6 +22,10 @@ Not all model providers support built-in tools. If you use a built-in tool with 
 
 If a provider supports a built-in tool that is not currently supported by Pydantic AI, please file an issue.
 
+Provider-adaptive capabilities
+
+For a higher-level, model-agnostic approach, consider the [provider-adaptive tool capabilities](https://ai.pydantic.dev/capabilities/#provider-adaptive-tools): WebSearch, WebFetch, ImageGeneration, and MCP. These automatically use the model's native tool when supported and fall back to a local implementation, so your agent works across providers without code changes.
+
 ## Dynamic Configuration
 
 Sometimes you need to configure a built-in tool dynamically based on the run context (e.g., user dependencies), or conditionally omit it. You can achieve this by passing a function to `builtin_tools` that takes RunContext as an argument and returns an AbstractBuiltinTool or `None`.
@@ -43,7 +47,7 @@ async def prepared_web_search(ctx: RunContext[dict]) -> WebSearchTool | None:
     )
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[prepared_web_search],
     deps_type=dict,
 )
@@ -80,7 +84,7 @@ async def prepared_web_search(ctx: RunContext[dict]) -> WebSearchTool | None:
     )
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[prepared_web_search],
     deps_type=dict,
 )
@@ -104,17 +108,22 @@ print(result.output)
 
 ## Web Search Tool
 
+Tip
+
+For a model-agnostic approach with automatic local fallback, see the WebSearch [capability](https://ai.pydantic.dev/capabilities/#provider-adaptive-tools).
+
 The WebSearchTool allows your agent to search the web, making it ideal for queries that require up-to-date data.
 
 ### Provider Support
 
 | Provider                | Supported | Notes                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI Responses        | ✅        | Full feature support. To include search results on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_web_search_sources [model setting](https://ai.pydantic.dev/agents/#model-run-settings).                                                                               |
+| OpenAI Responses        | ✅        | Full feature support. To include search results on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_web_search_sources [model setting](https://ai.pydantic.dev/agent/#model-run-settings).                                                                                |
 | Anthropic               | ✅        | Full feature support                                                                                                                                                                                                                                                                                                                                             |
 | Google                  | ✅        | No parameter support. No BuiltinToolCallPart or BuiltinToolReturnPart is generated when streaming. Using built-in tools and function tools (including [output tools](https://ai.pydantic.dev/output/#tool-output)) at the same time is not supported; to use structured output, use [`PromptedOutput`](https://ai.pydantic.dev/output/#prompted-output) instead. |
 | xAI                     | ✅        | Supports `blocked_domains` and `allowed_domains` parameters.                                                                                                                                                                                                                                                                                                     |
 | Groq                    | ✅        | Limited parameter support. To use web search capabilities with Groq, you need to use the [compound models](https://console.groq.com/docs/compound).                                                                                                                                                                                                              |
+| OpenRouter              | ✅        | Web search via [plugins](https://openrouter.ai/docs/features/web-search). Supports `search_context_size`. Uses native search for supported providers (OpenAI, Anthropic, Perplexity, xAI), Exa for others.                                                                                                                                                       |
 | OpenAI Chat Completions | ❌        | Not supported                                                                                                                                                                                                                                                                                                                                                    |
 | Bedrock                 | ❌        | Not supported                                                                                                                                                                                                                                                                                                                                                    |
 | Mistral                 | ❌        | Not supported                                                                                                                                                                                                                                                                                                                                                    |
@@ -129,7 +138,7 @@ The WebSearchTool allows your agent to search the web, making it ideal for queri
 ```python
 from pydantic_ai import Agent, WebSearchTool
 
-agent = Agent('gateway/anthropic:claude-sonnet-4-0', builtin_tools=[WebSearchTool()])
+agent = Agent('gateway/anthropic:claude-sonnet-4-6', builtin_tools=[WebSearchTool()])
 
 result = agent.run_sync('Give me a sentence with the biggest news in AI this week.')
 print(result.output)
@@ -141,7 +150,7 @@ web_search_anthropic.py
 ```python
 from pydantic_ai import Agent, WebSearchTool
 
-agent = Agent('anthropic:claude-sonnet-4-0', builtin_tools=[WebSearchTool()])
+agent = Agent('anthropic:claude-sonnet-4-6', builtin_tools=[WebSearchTool()])
 
 result = agent.run_sync('Give me a sentence with the biggest news in AI this week.')
 print(result.output)
@@ -157,7 +166,7 @@ With OpenAI, you must use their Responses API to access the web search tool.
 ```python
 from pydantic_ai import Agent, WebSearchTool
 
-agent = Agent('gateway/openai-responses:gpt-5', builtin_tools=[WebSearchTool()])
+agent = Agent('gateway/openai-responses:gpt-5.2', builtin_tools=[WebSearchTool()])
 
 result = agent.run_sync('Give me a sentence with the biggest news in AI this week.')
 print(result.output)
@@ -169,7 +178,7 @@ web_search_openai.py
 ```python
 from pydantic_ai import Agent, WebSearchTool
 
-agent = Agent('openai-responses:gpt-5', builtin_tools=[WebSearchTool()])
+agent = Agent('openai-responses:gpt-5.2', builtin_tools=[WebSearchTool()])
 
 result = agent.run_sync('Give me a sentence with the biggest news in AI this week.')
 print(result.output)
@@ -188,7 +197,7 @@ The `WebSearchTool` supports several configuration parameters:
 from pydantic_ai import Agent, WebSearchTool, WebSearchUserLocation
 
 agent = Agent(
-    'gateway/anthropic:claude-sonnet-4-0',
+    'gateway/anthropic:claude-sonnet-4-6',
     builtin_tools=[
         WebSearchTool(
             search_context_size='high',
@@ -216,7 +225,7 @@ web_search_configured.py
 from pydantic_ai import Agent, WebSearchTool, WebSearchUserLocation
 
 agent = Agent(
-    'anthropic:claude-sonnet-4-0',
+    'anthropic:claude-sonnet-4-6',
     builtin_tools=[
         WebSearchTool(
             search_context_size='high',
@@ -242,13 +251,13 @@ print(result.output)
 
 #### Provider Support
 
-| Parameter             | OpenAI | Anthropic | xAI | Groq |
-| --------------------- | ------ | --------- | --- | ---- |
-| `search_context_size` | ✅     | ❌        | ❌  | ❌   |
-| `user_location`       | ✅     | ✅        | ❌  | ❌   |
-| `blocked_domains`     | ❌     | ✅        | ✅  | ✅   |
-| `allowed_domains`     | ✅     | ✅        | ✅  | ✅   |
-| `max_uses`            | ❌     | ✅        | ❌  | ❌   |
+| Parameter             | OpenAI | Anthropic | xAI | Groq | OpenRouter |
+| --------------------- | ------ | --------- | --- | ---- | ---------- |
+| `search_context_size` | ✅     | ❌        | ❌  | ❌   | ✅         |
+| `user_location`       | ✅     | ✅        | ❌  | ❌   | ❌         |
+| `blocked_domains`     | ❌     | ✅        | ✅  | ✅   | ❌         |
+| `allowed_domains`     | ✅     | ✅        | ✅  | ✅   | ❌         |
+| `max_uses`            | ❌     | ✅        | ❌  | ❌   | ❌         |
 
 Anthropic Domain Filtering
 
@@ -260,18 +269,18 @@ The CodeExecutionTool enables your agent to execute code in a secure environment
 
 ### Provider Support
 
-| Provider    | Supported | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI      | ✅        | To include code execution output on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_code_execution_outputs [model setting](https://ai.pydantic.dev/agents/#model-run-settings). If the code execution generated images, like charts, they will be available on ModelResponse.images as BinaryImage objects. The generated image can also be used as [image output](https://ai.pydantic.dev/output/#image-output) for the agent run. |
-| Google      | ✅        | Using built-in tools and function tools (including [output tools](https://ai.pydantic.dev/output/#tool-output)) at the same time is not supported; to use structured output, use [`PromptedOutput`](https://ai.pydantic.dev/output/#prompted-output) instead.                                                                                                                                                                                                                                                               |
-| Anthropic   | ✅        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| xAI         | ✅        | Full feature support.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Groq        | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Bedrock     | ✅        | Only available for Nova 2.0 models.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Mistral     | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Cohere      | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| HuggingFace | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Outlines    | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Provider    | Supported | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI      | ✅        | To include code execution output on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_code_execution_outputs [model setting](https://ai.pydantic.dev/agent/#model-run-settings). If the code execution generated images, like charts, they will be available on ModelResponse.images as BinaryImage objects. The generated image can also be used as [image output](https://ai.pydantic.dev/output/#image-output) for the agent run. |
+| Google      | ✅        | Using built-in tools and function tools (including [output tools](https://ai.pydantic.dev/output/#tool-output)) at the same time is not supported; to use structured output, use [`PromptedOutput`](https://ai.pydantic.dev/output/#prompted-output) instead.                                                                                                                                                                                                                                                              |
+| Anthropic   | ✅        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| xAI         | ✅        | Full feature support.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Groq        | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Bedrock     | ✅        | Only available for Nova 2.0 models.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Mistral     | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Cohere      | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| HuggingFace | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Outlines    | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ### Usage
 
@@ -280,7 +289,7 @@ The CodeExecutionTool enables your agent to execute code in a secure environment
 ```python
 from pydantic_ai import Agent, CodeExecutionTool
 
-agent = Agent('gateway/anthropic:claude-sonnet-4-0', builtin_tools=[CodeExecutionTool()])
+agent = Agent('gateway/anthropic:claude-sonnet-4-6', builtin_tools=[CodeExecutionTool()])
 
 result = agent.run_sync('Calculate the factorial of 15.')
 print(result.output)
@@ -320,7 +329,7 @@ code_execution_basic.py
 ```python
 from pydantic_ai import Agent, CodeExecutionTool
 
-agent = Agent('anthropic:claude-sonnet-4-0', builtin_tools=[CodeExecutionTool()])
+agent = Agent('anthropic:claude-sonnet-4-6', builtin_tools=[CodeExecutionTool()])
 
 result = agent.run_sync('Calculate the factorial of 15.')
 print(result.output)
@@ -357,7 +366,7 @@ print(result.response.builtin_tool_calls)
 
 *(This example is complete, it can be run "as is")*
 
-In addition to text output, code execution with OpenAI can generate images as part of their response. Accessing this image via ModelResponse.images or [image output](https://ai.pydantic.dev/output/#image-output) requires the OpenAIResponsesModelSettings.openai_include_code_execution_outputs [model setting](https://ai.pydantic.dev/agents/#model-run-settings) to be enabled.
+In addition to text output, code execution with OpenAI can generate images as part of their response. Accessing this image via ModelResponse.images or [image output](https://ai.pydantic.dev/output/#image-output) requires the OpenAIResponsesModelSettings.openai_include_code_execution_outputs [model setting](https://ai.pydantic.dev/agent/#model-run-settings) to be enabled.
 
 [Learn about Gateway](https://ai.pydantic.dev/gateway) code_execution_openai.py
 
@@ -366,7 +375,7 @@ from pydantic_ai import Agent, BinaryImage, CodeExecutionTool
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[CodeExecutionTool()],
     output_type=BinaryImage,
     model_settings=OpenAIResponsesModelSettings(openai_include_code_execution_outputs=True),
@@ -383,7 +392,7 @@ from pydantic_ai import Agent, BinaryImage, CodeExecutionTool
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[CodeExecutionTool()],
     output_type=BinaryImage,
     model_settings=OpenAIResponsesModelSettings(openai_include_code_execution_outputs=True),
@@ -397,21 +406,25 @@ assert isinstance(result.output, BinaryImage)
 
 ## Image Generation Tool
 
+Tip
+
+For a model-agnostic approach with automatic local fallback, see the ImageGeneration [capability](https://ai.pydantic.dev/capabilities/#provider-adaptive-tools).
+
 The ImageGenerationTool enables your agent to generate images.
 
 ### Provider Support
 
-| Provider         | Supported | Notes                                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenAI Responses | ✅        | Full feature support. Only supported by models newer than `gpt-5`. Metadata about the generated image, like the [`revised_prompt`](https://platform.openai.com/docs/guides/tools-image-generation#revised-prompt) sent to the underlying image model, is available on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls.                                            |
-| Google           | ✅        | Limited parameter support. Only supported by [image generation models](https://ai.google.dev/gemini-api/docs/image-generation) like `gemini-2.5-flash-image` and `gemini-3-pro-image-preview`. These models do not support [function tools](https://ai.pydantic.dev/tools/index.md) and will always have the option of generating images, even if this built-in tool is not explicitly specified. |
-| Anthropic        | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| xAI              | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Groq             | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Bedrock          | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Mistral          | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| Cohere           | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
-| HuggingFace      | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Provider         | Supported | Notes                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenAI Responses | ✅        | Full feature support. Only supported by models newer than `gpt-5.2`. Metadata about the generated image, like the [`revised_prompt`](https://platform.openai.com/docs/guides/tools-image-generation#revised-prompt) sent to the underlying image model, is available on the BuiltinToolReturnPart that's available via ModelResponse.builtin_tool_calls.                                              |
+| Google           | ✅        | Limited parameter support. Only supported by [image generation models](https://ai.google.dev/gemini-api/docs/image-generation) like `gemini-3-pro-image-preview` and `gemini-3-pro-image-preview`. These models do not support [function tools](https://ai.pydantic.dev/tools/index.md) and will always have the option of generating images, even if this built-in tool is not explicitly specified. |
+| Anthropic        | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| xAI              | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Groq             | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Bedrock          | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Mistral          | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Cohere           | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
+| HuggingFace      | ❌        |                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Usage
 
@@ -422,7 +435,7 @@ Generated images are available on ModelResponse.images as BinaryImage objects:
 ```python
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
-agent = Agent('gateway/openai-responses:gpt-5', builtin_tools=[ImageGenerationTool()])
+agent = Agent('gateway/openai-responses:gpt-5.2', builtin_tools=[ImageGenerationTool()])
 
 result = agent.run_sync('Tell me a two-sentence story about an axolotl with an illustration.')
 print(result.output)
@@ -438,7 +451,7 @@ image_generation_openai.py
 ```python
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
-agent = Agent('openai-responses:gpt-5', builtin_tools=[ImageGenerationTool()])
+agent = Agent('openai-responses:gpt-5.2', builtin_tools=[ImageGenerationTool()])
 
 result = agent.run_sync('Tell me a two-sentence story about an axolotl with an illustration.')
 print(result.output)
@@ -458,7 +471,7 @@ Image generation with Google [image generation models](https://ai.google.dev/gem
 ```python
 from pydantic_ai import Agent, BinaryImage
 
-agent = Agent('gateway/gemini:gemini-2.5-flash-image')
+agent = Agent('gateway/gemini:gemini-3-pro-image-preview')
 
 result = agent.run_sync('Tell me a two-sentence story about an axolotl with an illustration.')
 print(result.output)
@@ -474,7 +487,7 @@ image_generation_google.py
 ```python
 from pydantic_ai import Agent, BinaryImage
 
-agent = Agent('google-gla:gemini-2.5-flash-image')
+agent = Agent('google-gla:gemini-3-pro-image-preview')
 
 result = agent.run_sync('Tell me a two-sentence story about an axolotl with an illustration.')
 print(result.output)
@@ -494,7 +507,7 @@ The `ImageGenerationTool` can be used together with `output_type=BinaryImage` to
 ```python
 from pydantic_ai import Agent, BinaryImage
 
-agent = Agent('gateway/openai-responses:gpt-5', output_type=BinaryImage)
+agent = Agent('gateway/openai-responses:gpt-5.2', output_type=BinaryImage)
 
 result = agent.run_sync('Generate an image of an axolotl.')
 assert isinstance(result.output, BinaryImage)
@@ -505,7 +518,7 @@ image_generation_output.py
 ```python
 from pydantic_ai import Agent, BinaryImage
 
-agent = Agent('openai-responses:gpt-5', output_type=BinaryImage)
+agent = Agent('openai-responses:gpt-5.2', output_type=BinaryImage)
 
 result = agent.run_sync('Generate an image of an axolotl.')
 assert isinstance(result.output, BinaryImage)
@@ -523,7 +536,7 @@ The `ImageGenerationTool` supports several configuration parameters:
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[
         ImageGenerationTool(
             background='transparent',
@@ -549,7 +562,7 @@ image_generation_configured.py
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[
         ImageGenerationTool(
             background='transparent',
@@ -581,7 +594,7 @@ To control the aspect ratio when using Gemini image models, include the `ImageGe
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
 agent = Agent(
-    'gateway/gemini:gemini-2.5-flash-image',
+    'gateway/gemini:gemini-3-pro-image-preview',
     builtin_tools=[ImageGenerationTool(aspect_ratio='16:9')],
     output_type=BinaryImage,
 )
@@ -596,7 +609,7 @@ image_generation_google_aspect_ratio.py
 from pydantic_ai import Agent, BinaryImage, ImageGenerationTool
 
 agent = Agent(
-    'google-gla:gemini-2.5-flash-image',
+    'google-gla:gemini-3-pro-image-preview',
     builtin_tools=[ImageGenerationTool(aspect_ratio='16:9')],
     output_type=BinaryImage,
 )
@@ -654,7 +667,7 @@ For more details, check the API documentation.
 | `output_format`      | ✅                                                   | ✅ (Vertex AI only)                                      |
 | `partial_images`     | ✅                                                   | ❌                                                       |
 | `quality`            | ✅                                                   | ❌                                                       |
-| `size`               | ✅ (auto (default), 1024x1024, 1024x1536, 1536x1024) | ✅ (1K (default), 2K, 4K)                                |
+| `size`               | ✅ (auto (default), 1024x1024, 1024x1536, 1536x1024) | ✅ (512, 1K (default), 2K, 4K)                           |
 | `aspect_ratio`       | ✅ (1:1, 2:3, 3:2)                                   | ✅ (1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9) |
 
 Notes
@@ -663,6 +676,10 @@ Notes
 - **Google (Vertex AI)**: Setting `output_compression` will default `output_format` to `jpeg` if not specified.
 
 ## Web Fetch Tool
+
+Tip
+
+For a model-agnostic approach with automatic local fallback, see the WebFetch [capability](https://ai.pydantic.dev/capabilities/#provider-adaptive-tools).
 
 The WebFetchTool enables your agent to pull URL contents into its context, allowing it to pull up-to-date information from the web.
 
@@ -688,7 +705,7 @@ The WebFetchTool enables your agent to pull URL contents into its context, allow
 ```python
 from pydantic_ai import Agent, WebFetchTool
 
-agent = Agent('gateway/gemini:gemini-2.5-flash', builtin_tools=[WebFetchTool()])
+agent = Agent('gateway/gemini:gemini-3-flash-preview', builtin_tools=[WebFetchTool()])
 
 result = agent.run_sync('What is this? https://ai.pydantic.dev')
 print(result.output)
@@ -700,7 +717,7 @@ web_fetch_basic.py
 ```python
 from pydantic_ai import Agent, WebFetchTool
 
-agent = Agent('google-gla:gemini-2.5-flash', builtin_tools=[WebFetchTool()])
+agent = Agent('google-gla:gemini-3-flash-preview', builtin_tools=[WebFetchTool()])
 
 result = agent.run_sync('What is this? https://ai.pydantic.dev')
 print(result.output)
@@ -719,7 +736,7 @@ The `WebFetchTool` supports several configuration parameters:
 from pydantic_ai import Agent, WebFetchTool
 
 agent = Agent(
-    'gateway/anthropic:claude-sonnet-4-0',
+    'gateway/anthropic:claude-sonnet-4-6',
     builtin_tools=[
         WebFetchTool(
             allowed_domains=['ai.pydantic.dev', 'docs.pydantic.dev'],
@@ -745,7 +762,7 @@ web_fetch_configured.py
 from pydantic_ai import Agent, WebFetchTool
 
 agent = Agent(
-    'anthropic:claude-sonnet-4-0',
+    'anthropic:claude-sonnet-4-6',
     builtin_tools=[
         WebFetchTool(
             allowed_domains=['ai.pydantic.dev', 'docs.pydantic.dev'],
@@ -846,7 +863,7 @@ class FakeMemoryTool(BetaAbstractMemoryTool):
 
 fake_memory = FakeMemoryTool()
 
-agent = Agent('gateway/anthropic:claude-sonnet-4-5', builtin_tools=[MemoryTool()])
+agent = Agent('gateway/anthropic:claude-sonnet-4-6', builtin_tools=[MemoryTool()])
 
 
 @agent.tool_plain
@@ -907,7 +924,7 @@ class FakeMemoryTool(BetaAbstractMemoryTool):
 
 fake_memory = FakeMemoryTool()
 
-agent = Agent('anthropic:claude-sonnet-4-5', builtin_tools=[MemoryTool()])
+agent = Agent('anthropic:claude-sonnet-4-6', builtin_tools=[MemoryTool()])
 
 
 @agent.tool_plain
@@ -929,6 +946,10 @@ print(result.output)
 *(This example is complete, it can be run "as is")*
 
 ## MCP Server Tool
+
+Tip
+
+For a model-agnostic approach with automatic local fallback, see the MCP [capability](https://ai.pydantic.dev/capabilities/#provider-adaptive-tools).
 
 The MCPServerTool allows your agent to use remote MCP servers with communication handled by the model provider.
 
@@ -957,7 +978,7 @@ This requires the MCP server to live at a public URL the provider can reach and 
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'gateway/anthropic:claude-sonnet-4-5',
+    'gateway/anthropic:claude-sonnet-4-6',
     builtin_tools=[
         MCPServerTool(
             id='deepwiki',
@@ -981,7 +1002,7 @@ mcp_server_anthropic.py
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'anthropic:claude-sonnet-4-5',
+    'anthropic:claude-sonnet-4-6',
     builtin_tools=[
         MCPServerTool(
             id='deepwiki',
@@ -1009,7 +1030,7 @@ With OpenAI, you must use their Responses API to access the MCP server tool:
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='deepwiki',
@@ -1033,7 +1054,7 @@ mcp_server_openai.py
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='deepwiki',
@@ -1065,7 +1086,7 @@ import os
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='github',
@@ -1095,7 +1116,7 @@ import os
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='github',
@@ -1129,7 +1150,7 @@ import os
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'gateway/openai-responses:gpt-5',
+    'gateway/openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='google-calendar',
@@ -1154,7 +1175,7 @@ import os
 from pydantic_ai import Agent, MCPServerTool
 
 agent = Agent(
-    'openai-responses:gpt-5',
+    'openai-responses:gpt-5.2',
     builtin_tools=[
         MCPServerTool(
             id='google-calendar',
@@ -1190,7 +1211,7 @@ The FileSearchTool enables your agent to search through uploaded files using vec
 
 | Provider                | Supported          | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| OpenAI Responses        | ✅                 | Full feature support. Requires files to be uploaded to vector stores via the [OpenAI Files API](https://platform.openai.com/docs/api-reference/files). To include search results on the BuiltinToolReturnPart available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_file_search_results [model setting](https://ai.pydantic.dev/agents/#model-run-settings).                                                            |
+| OpenAI Responses        | ✅                 | Full feature support. Requires files to be uploaded to vector stores via the [OpenAI Files API](https://platform.openai.com/docs/api-reference/files). To include search results on the BuiltinToolReturnPart available via ModelResponse.builtin_tool_calls, enable the OpenAIResponsesModelSettings.openai_include_file_search_results [model setting](https://ai.pydantic.dev/agent/#model-run-settings).                                                             |
 | Google (Gemini)         | ✅                 | Requires files to be uploaded via the [Gemini Files API](https://ai.google.dev/gemini-api/docs/files). Files are automatically deleted after 48 hours. Supports up to 2 GB per file and 20 GB per project. Using built-in tools and function tools (including [output tools](https://ai.pydantic.dev/output/#tool-output)) at the same time is not supported; to use structured output, use [`PromptedOutput`](https://ai.pydantic.dev/output/#prompted-output) instead. |
 |                         | Google (Vertex AI) | ❌                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Anthropic               | ❌                 | Not supported                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -1218,7 +1239,7 @@ from pydantic_ai.models.openai import OpenAIResponsesModel
 
 
 async def main():
-    model = OpenAIResponsesModel('gpt-5')
+    model = OpenAIResponsesModel('gpt-5.2')
 
     with open('my_document.txt', 'rb') as f:
         file = await model.client.files.create(file=f, purpose='assistants')
@@ -1255,7 +1276,7 @@ from pydantic_ai.models.google import GoogleModel
 
 
 async def main():
-    model = GoogleModel('gemini-2.5-flash')
+    model = GoogleModel('gemini-3-flash-preview')
 
     store = await model.client.aio.file_search_stores.create(
         config={'display_name': 'my-docs'}

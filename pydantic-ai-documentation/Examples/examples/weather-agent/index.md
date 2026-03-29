@@ -255,7 +255,7 @@ You can build multi-turn chat applications for your agent with [Gradio](https://
 Here's what the UI looks like for the weather agent:
 
 ```bash
-pip install gradio>=5.9.0
+pip install gradio>=6.7.0
 python/uv-run -m pydantic_ai_examples.weather_agent_gradio
 ```
 

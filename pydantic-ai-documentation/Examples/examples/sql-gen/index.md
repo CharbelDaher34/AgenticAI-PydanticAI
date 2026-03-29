@@ -4,7 +4,7 @@ Example demonstrating how to use Pydantic AI to generate SQL queries based on us
 
 Demonstrates:
 
-- [dynamic system prompt](https://ai.pydantic.dev/agents/#system-prompts)
+- [dynamic system prompt](https://ai.pydantic.dev/agent/#system-prompts)
 - [structured `output_type`](https://ai.pydantic.dev/output/#structured-output)
 - [output validation](https://ai.pydantic.dev/output/#output-validator-functions)
 - [agent dependencies](https://ai.pydantic.dev/dependencies/index.md)
@@ -39,7 +39,7 @@ python -m pydantic_ai_examples.sql_gen "find me errors"
 uv run -m pydantic_ai_examples.sql_gen "find me errors"
 ```
 
-This model uses `gemini-2.5-flash` by default since Gemini is good at single shot queries of this kind.
+This model uses `gemini-3-flash-preview` by default since Gemini is good at single shot queries of this kind.
 
 ## Example Code
 
@@ -140,7 +140,7 @@ class InvalidRequest(BaseModel):
 
 Response: TypeAlias = Success | InvalidRequest
 agent = Agent[Deps, Response](
-    'google-gla:gemini-2.5-flash',
+    'google-gla:gemini-3-flash-preview',
     # Type ignore while we wait for PEP-0747, nonetheless unions will work fine everywhere else
     output_type=Response,  # type: ignore
     deps_type=Deps,

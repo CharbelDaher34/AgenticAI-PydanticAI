@@ -1,6 +1,6 @@
 # Dependencies
 
-Pydantic AI uses a dependency injection system to provide data and services to your agent's [system prompts](https://ai.pydantic.dev/agents/#system-prompts), [tools](https://ai.pydantic.dev/tools/index.md) and [output validators](https://ai.pydantic.dev/output/#output-validator-functions).
+Pydantic AI uses a dependency injection system to provide data and services to your agent's [system prompts](https://ai.pydantic.dev/agent/#system-prompts), [tools](https://ai.pydantic.dev/tools/index.md) and [output validators](https://ai.pydantic.dev/output/#output-validator-functions).
 
 Matching Pydantic AI's design philosophy, our dependency system tries to use existing best practice in Python development rather than inventing esoteric "magic", this should make dependencies type-safe, understandable, easier to test, and ultimately easier to deploy in production.
 
@@ -29,7 +29,7 @@ class MyDeps:  # (1)!
 
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=MyDeps,  # (2)!
 )
 
@@ -66,7 +66,7 @@ class MyDeps:  # (1)!
 
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=MyDeps,  # (2)!
 )
 
@@ -109,7 +109,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -154,7 +154,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -184,9 +184,11 @@ async def main():
 
 *(This example is complete, it can be run "as is" — you'll need to add `asyncio.run(main())` to run `main`)*
 
+Dependency fields can also be referenced in instructions and descriptions via [template strings](https://ai.pydantic.dev/agent-spec/#template-strings) — for example, `TemplateStr('Hello {{name}}')` renders `name` from the deps object at runtime. This is especially useful in [agent specs](https://ai.pydantic.dev/agent-spec/index.md) where callables aren't available.
+
 ### Asynchronous vs. Synchronous dependencies
 
-[System prompt functions](https://ai.pydantic.dev/agents/#system-prompts), [function tools](https://ai.pydantic.dev/tools/index.md) and [output validators](https://ai.pydantic.dev/output/#output-validator-functions) are all run in the async context of an agent run.
+[System prompt functions](https://ai.pydantic.dev/agent/#system-prompts), [function tools](https://ai.pydantic.dev/tools/index.md) and [output validators](https://ai.pydantic.dev/output/#output-validator-functions) are all run in the async context of an agent run.
 
 If these functions are not coroutines (e.g. `async def`) they are called with run_in_executor in a thread pool. It's therefore marginally preferable to use `async` methods where dependencies perform IO, although synchronous dependencies should work fine too.
 
@@ -213,7 +215,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -257,7 +259,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -307,7 +309,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -371,7 +373,7 @@ class MyDeps:
 
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=MyDeps,
 )
 
@@ -449,7 +451,7 @@ class MyDeps:
         return f'Prompt: {response.text}'
 
 
-joke_agent = Agent('gateway/openai:gpt-5', deps_type=MyDeps)
+joke_agent = Agent('gateway/openai:gpt-5.2', deps_type=MyDeps)
 
 
 @joke_agent.system_prompt
@@ -493,7 +495,7 @@ class MyDeps:
         return f'Prompt: {response.text}'
 
 
-joke_agent = Agent('openai:gpt-5', deps_type=MyDeps)
+joke_agent = Agent('openai:gpt-5.2', deps_type=MyDeps)
 
 
 @joke_agent.system_prompt

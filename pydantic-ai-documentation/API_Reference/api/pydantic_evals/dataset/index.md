@@ -354,6 +354,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
     """List of test cases in the dataset."""
     evaluators: list[Evaluator[InputsT, OutputT, MetadataT]] = []
     """List of evaluators to be used on all cases in the dataset."""
+    report_evaluators: list[ReportEvaluator[InputsT, OutputT, MetadataT]] = []
+    """Evaluators that operate on the full report to produce experiment-wide analyses."""
 
     def __init__(
         self,
@@ -361,6 +363,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         name: str | None = None,
         cases: Sequence[Case[InputsT, OutputT, MetadataT]],
         evaluators: Sequence[Evaluator[InputsT, OutputT, MetadataT]] = (),
+        report_evaluators: Sequence[ReportEvaluator[InputsT, OutputT, MetadataT]] = (),
     ):
         """Initialize a new dataset with test cases and optional evaluators.
 
@@ -368,6 +371,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             name: Optional name for the dataset.
             cases: Sequence of test cases to include in the dataset.
             evaluators: Optional sequence of evaluators to apply to all cases in the dataset.
+            report_evaluators: Optional sequence of report evaluators that run on the full evaluation report.
         """
         case_names = set[str]()
         for case in cases:
@@ -381,7 +385,20 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             name=name,
             cases=cases,
             evaluators=list(evaluators),
+            report_evaluators=list(report_evaluators),
         )
+
+    def _build_tasks_to_run(self, repeat: int) -> list[tuple[Case[InputsT, OutputT, MetadataT], str, str | None]]:
+        """Build the list of (case, report_case_name, source_case_name) tuples for evaluation."""
+        if repeat > 1:
+            return [
+                (case, f'{case_name} [{run_idx}/{repeat}]', case_name)
+                for i, case in enumerate(self.cases, 1)
+                for run_idx in range(1, repeat + 1)
+                if (case_name := case.name or f'Case {i}')
+            ]
+        else:
+            return [(case, case.name or f'Case {i}', None) for i, case in enumerate(self.cases, 1)]
 
     # TODO in v2: Make everything not required keyword-only
     async def evaluate(
@@ -395,6 +412,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         *,
         task_name: str | None = None,
         metadata: dict[str, Any] | None = None,
+        repeat: int = 1,
+        lifecycle: type[CaseLifecycle[InputsT, OutputT, MetadataT]] | None = None,
     ) -> EvaluationReport[InputsT, OutputT, MetadataT]:
         """Evaluates the test cases in the dataset using the given task.
 
@@ -414,13 +433,22 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             task_name: Optional override to the name of the task being executed, otherwise the name of the task
                 function will be used.
             metadata: Optional dict of experiment metadata.
+            repeat: Number of times to run each case. When > 1, each case is run multiple times and
+                results are grouped by the original case name for aggregation. Defaults to 1.
+            lifecycle: Optional lifecycle class for per-case setup, context preparation, and teardown hooks.
+                A new instance is created for each case. See [`CaseLifecycle`][pydantic_evals.lifecycle.CaseLifecycle].
 
         Returns:
             A report containing the results of the evaluation.
         """
+        if repeat < 1:
+            raise ValueError(f'repeat must be >= 1, got {repeat}')
+
         task_name = task_name or get_unwrapped_function_name(task)
         name = name or task_name
-        total_cases = len(self.cases)
+
+        tasks_to_run = self._build_tasks_to_run(repeat)
+        total_tasks = len(tasks_to_run)
         progress_bar = Progress() if progress else None
 
         limiter = anyio.Semaphore(max_concurrency) if max_concurrency is not None else AsyncExitStack()
@@ -428,6 +456,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         extra_attributes: dict[str, Any] = {'gen_ai.operation.name': 'experiment'}
         if metadata is not None:
             extra_attributes['metadata'] = metadata
+        if repeat > 1:
+            extra_attributes['logfire.experiment.repeat'] = repeat
         with (
             logfire_span(
                 'evaluate {name}',
@@ -439,12 +469,23 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             ) as eval_span,
             progress_bar or nullcontext(),
         ):
-            task_id = progress_bar.add_task(f'Evaluating {task_name}', total=total_cases) if progress_bar else None
+            task_id = progress_bar.add_task(f'Evaluating {task_name}', total=total_tasks) if progress_bar else None
 
-            async def _handle_case(case: Case[InputsT, OutputT, MetadataT], report_case_name: str):
+            async def _handle_case(
+                case: Case[InputsT, OutputT, MetadataT],
+                report_case_name: str,
+                source_case_name: str | None,
+            ):
                 async with limiter:
                     result = await _run_task_and_evaluators(
-                        task, case, report_case_name, self.evaluators, retry_task, retry_evaluators
+                        task,
+                        case,
+                        report_case_name,
+                        self.evaluators,
+                        retry_task,
+                        retry_evaluators,
+                        source_case_name=source_case_name,
+                        lifecycle=lifecycle,
                     )
                     if progress_bar and task_id is not None:  # pragma: no branch
                         progress_bar.update(task_id, advance=1)
@@ -458,8 +499,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
                 span_id = f'{context.span_id:016x}'
             cases_and_failures = await task_group_gather(
                 [
-                    lambda case=case, i=i: _handle_case(case, case.name or f'Case {i}')
-                    for i, case in enumerate(self.cases, 1)
+                    lambda case=case, rn=report_name, scn=source_name: _handle_case(case, rn, scn)
+                    for case, report_name, source_name in tasks_to_run
                 ]
             )
             cases: list[ReportCase] = []
@@ -477,14 +518,17 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
                 span_id=span_id,
                 trace_id=trace_id,
             )
-            full_experiment_metadata: dict[str, Any] = {'n_cases': len(self.cases)}
-            if metadata is not None:
-                full_experiment_metadata['metadata'] = metadata
-            if (averages := report.averages()) is not None:
-                full_experiment_metadata['averages'] = averages
-                if averages.assertions is not None:
-                    eval_span.set_attribute('assertion_pass_rate', averages.assertions)
-            eval_span.set_attribute('logfire.experiment.metadata', full_experiment_metadata)
+
+            # Run report evaluators
+            if self.report_evaluators:
+                report_ctx = ReportEvaluatorContext(
+                    name=name,
+                    report=report,
+                    experiment_metadata=metadata,
+                )
+                await _run_report_evaluators(self.report_evaluators, report_ctx)
+
+            _set_experiment_span_attributes(eval_span, report, metadata, len(self.cases), repeat)
         return report
 
     def evaluate_sync(
@@ -498,6 +542,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         *,
         task_name: str | None = None,
         metadata: dict[str, Any] | None = None,
+        repeat: int = 1,
+        lifecycle: type[CaseLifecycle[InputsT, OutputT, MetadataT]] | None = None,
     ) -> EvaluationReport[InputsT, OutputT, MetadataT]:
         """Evaluates the test cases in the dataset using the given task.
 
@@ -516,6 +562,10 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             task_name: Optional override to the name of the task being executed, otherwise the name of the task
                 function will be used.
             metadata: Optional dict of experiment metadata.
+            repeat: Number of times to run each case. When > 1, each case is run multiple times and
+                results are grouped by the original case name for aggregation. Defaults to 1.
+            lifecycle: Optional lifecycle class for per-case setup, context preparation, and teardown hooks.
+                A new instance is created for each case. See [`CaseLifecycle`][pydantic_evals.lifecycle.CaseLifecycle].
 
         Returns:
             A report containing the results of the evaluation.
@@ -530,6 +580,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
                 retry_evaluators=retry_evaluators,
                 task_name=task_name,
                 metadata=metadata,
+                repeat=repeat,
+                lifecycle=lifecycle,
             )
         )
 
@@ -620,6 +672,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         path: Path | str,
         fmt: Literal['yaml', 'json'] | None = None,
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     ) -> Self:
         """Load a dataset from a file.
 
@@ -629,6 +682,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
                 Must be either 'yaml' or 'json'.
             custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
                 These are additional evaluators beyond the default ones.
+            custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+                These are additional report evaluators beyond the default ones.
 
         Returns:
             A new Dataset instance loaded from the file.
@@ -642,7 +697,13 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
 
         raw = Path(path).read_text(encoding='utf-8')
         try:
-            return cls.from_text(raw, fmt=fmt, custom_evaluator_types=custom_evaluator_types, default_name=path.stem)
+            return cls.from_text(
+                raw,
+                fmt=fmt,
+                custom_evaluator_types=custom_evaluator_types,
+                custom_report_evaluator_types=custom_report_evaluator_types,
+                default_name=path.stem,
+            )
         except ValidationError as e:  # pragma: no cover
             raise ValueError(f'{path} contains data that does not match the schema for {cls.__name__}:\n{e}.') from e
 
@@ -652,6 +713,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         contents: str,
         fmt: Literal['yaml', 'json'] = 'yaml',
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
         *,
         default_name: str | None = None,
     ) -> Self:
@@ -662,6 +724,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             fmt: Format of the content. Must be either 'yaml' or 'json'.
             custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
                 These are additional evaluators beyond the default ones.
+            custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+                These are additional report evaluators beyond the default ones.
             default_name: Default name of the dataset, to be used if not specified in the serialized contents.
 
         Returns:
@@ -672,17 +736,22 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         """
         if fmt == 'yaml':
             loaded = yaml.safe_load(contents)
-            return cls.from_dict(loaded, custom_evaluator_types, default_name=default_name)
+            return cls.from_dict(
+                loaded, custom_evaluator_types, custom_report_evaluator_types, default_name=default_name
+            )
         else:
             dataset_model_type = cls._serialization_type()
             dataset_model = dataset_model_type.model_validate_json(contents)
-            return cls._from_dataset_model(dataset_model, custom_evaluator_types, default_name)
+            return cls._from_dataset_model(
+                dataset_model, custom_evaluator_types, custom_report_evaluator_types, default_name
+            )
 
     @classmethod
     def from_dict(
         cls,
         data: dict[str, Any],
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
         *,
         default_name: str | None = None,
     ) -> Self:
@@ -692,6 +761,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             data: Dictionary representation of the dataset.
             custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
                 These are additional evaluators beyond the default ones.
+            custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+                These are additional report evaluators beyond the default ones.
             default_name: Default name of the dataset, to be used if not specified in the data.
 
         Returns:
@@ -702,13 +773,16 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         """
         dataset_model_type = cls._serialization_type()
         dataset_model = dataset_model_type.model_validate(data)
-        return cls._from_dataset_model(dataset_model, custom_evaluator_types, default_name)
+        return cls._from_dataset_model(
+            dataset_model, custom_evaluator_types, custom_report_evaluator_types, default_name
+        )
 
     @classmethod
     def _from_dataset_model(
         cls,
         dataset_model: _DatasetModel[InputsT, OutputT, MetadataT],
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
         default_name: str | None = None,
     ) -> Self:
         """Create a Dataset from a _DatasetModel.
@@ -716,29 +790,52 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         Args:
             dataset_model: The _DatasetModel to convert.
             custom_evaluator_types: Custom evaluator classes to register for deserialization.
+            custom_report_evaluator_types: Custom report evaluator classes to register for deserialization.
             default_name: Default name of the dataset, to be used if the value is `None` in the provided model.
 
         Returns:
             A new Dataset instance created from the _DatasetModel.
         """
-        registry = _get_registry(custom_evaluator_types)
+        registry = _get_evaluator_registry(custom_evaluator_types, Evaluator, DEFAULT_EVALUATORS, 'evaluator')
+        report_evaluator_registry = _get_evaluator_registry(
+            custom_report_evaluator_types, ReportEvaluator, DEFAULT_REPORT_EVALUATORS, 'report evaluator'
+        )
 
         cases: list[Case[InputsT, OutputT, MetadataT]] = []
         errors: list[ValueError] = []
         dataset_evaluators: list[Evaluator] = []
         for spec in dataset_model.evaluators:
             try:
-                dataset_evaluator = _load_evaluator_from_registry(registry, None, spec)
+                dataset_evaluator = _load_evaluator_from_registry(
+                    registry, spec, 'evaluator', 'custom_evaluator_types', context='dataset'
+                )
             except ValueError as e:
                 errors.append(e)
                 continue
             dataset_evaluators.append(dataset_evaluator)
 
+        report_evaluators: list[ReportEvaluator] = []
+        for spec in dataset_model.report_evaluators:
+            try:
+                report_evaluator = _load_evaluator_from_registry(
+                    report_evaluator_registry,
+                    spec,
+                    'report evaluator',
+                    'custom_report_evaluator_types',
+                    context='dataset',
+                )
+            except ValueError as e:
+                errors.append(e)
+                continue
+            report_evaluators.append(report_evaluator)
+
         for row in dataset_model.cases:
             evaluators: list[Evaluator] = []
             for spec in row.evaluators:
                 try:
-                    evaluator = _load_evaluator_from_registry(registry, row.name, spec)
+                    evaluator = _load_evaluator_from_registry(
+                        registry, spec, 'evaluator', 'custom_evaluator_types', context=f'case {row.name!r}'
+                    )
                 except ValueError as e:
                     errors.append(e)
                     continue
@@ -753,7 +850,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             cases.append(row)
         if errors:
             raise ExceptionGroup(f'{len(errors)} error(s) loading evaluators from registry', errors[:3])
-        result = cls(name=dataset_model.name, cases=cases)
+        result = cls(name=dataset_model.name, cases=cases, report_evaluators=report_evaluators)
         if result.name is None:
             result.name = default_name
         result.evaluators = dataset_evaluators
@@ -765,6 +862,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
         fmt: Literal['yaml', 'json'] | None = None,
         schema_path: Path | str | None = DEFAULT_SCHEMA_PATH_TEMPLATE,
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     ):
         """Save the dataset to a file.
 
@@ -775,6 +873,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             schema_path: Path to save the JSON schema to. If None, no schema will be saved.
                 Can be a string template with {stem} which will be replaced with the dataset filename stem.
             custom_evaluator_types: Custom evaluator classes to include in the schema.
+            custom_report_evaluator_types: Custom report evaluator classes to include in the schema.
         """
         path = Path(path)
         fmt = self._infer_fmt(path, fmt)
@@ -791,7 +890,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
                 schema_ref = str(_get_relative_path_reference(schema_path, path))
             else:  # pragma: no cover
                 schema_ref = str(schema_path)
-            self._save_schema(schema_path, custom_evaluator_types)
+            self._save_schema(schema_path, custom_evaluator_types, custom_report_evaluator_types)
 
         context: dict[str, Any] = {'use_short_form': True}
         if fmt == 'yaml':
@@ -810,6 +909,7 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
     def model_json_schema_with_evaluators(
         cls,
         custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     ) -> dict[str, Any]:
         """Generate a JSON schema for this dataset type, including evaluator details.
 
@@ -817,49 +917,19 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
 
         Args:
             custom_evaluator_types: Custom evaluator classes to include in the schema.
+            custom_report_evaluator_types: Custom report evaluator classes to include in the schema.
 
         Returns:
             A dictionary representing the JSON schema.
         """
-        # Note: this function could maybe be simplified now that Evaluators are always dataclasses
-        registry = _get_registry(custom_evaluator_types)
-
-        evaluator_schema_types: list[Any] = []
-        for name, evaluator_class in registry.items():
-            type_hints = _typing_extra.get_function_type_hints(evaluator_class)
-            type_hints.pop('return', None)
-            required_type_hints: dict[str, Any] = {}
-
-            for p in inspect.signature(evaluator_class).parameters.values():
-                type_hints.setdefault(p.name, Any)
-                if p.default is not p.empty:
-                    type_hints[p.name] = NotRequired[type_hints[p.name]]
-                else:
-                    required_type_hints[p.name] = type_hints[p.name]
-
-            def _make_typed_dict(cls_name_prefix: str, fields: dict[str, Any]) -> Any:
-                td = TypedDict(f'{cls_name_prefix}_{name}', fields)  # pyright: ignore[reportArgumentType]
-                config = ConfigDict(extra='forbid', arbitrary_types_allowed=True)
-                # TODO: Replace with pydantic.with_config once pydantic 2.11 is the min supported version
-                td.__pydantic_config__ = config  # pyright: ignore[reportAttributeAccessIssue]
-                return td
-
-            # Shortest form: just the call name
-            if len(type_hints) == 0 or not required_type_hints:
-                evaluator_schema_types.append(Literal[name])
-
-            # Short form: can be called with only one parameter
-            if len(type_hints) == 1:
-                [type_hint_type] = type_hints.values()
-                evaluator_schema_types.append(_make_typed_dict('short_evaluator', {name: type_hint_type}))
-            elif len(required_type_hints) == 1:  # pragma: no branch
-                [type_hint_type] = required_type_hints.values()
-                evaluator_schema_types.append(_make_typed_dict('short_evaluator', {name: type_hint_type}))
-
-            # Long form: multiple parameters, possibly required
-            if len(type_hints) > 1:
-                params_td = _make_typed_dict('evaluator_params', type_hints)
-                evaluator_schema_types.append(_make_typed_dict('evaluator', {name: params_td}))
+        evaluator_schema_types = _build_evaluator_schema_types(
+            _get_evaluator_registry(custom_evaluator_types, Evaluator, DEFAULT_EVALUATORS, 'evaluator')
+        )
+        report_evaluator_schema_types = _build_evaluator_schema_types(
+            _get_evaluator_registry(
+                custom_report_evaluator_types, ReportEvaluator, DEFAULT_REPORT_EVALUATORS, 'report evaluator'
+            )
+        )
 
         in_type, out_type, meta_type = cls._params()
 
@@ -877,6 +947,8 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
             cases: list[Case]
             if evaluator_schema_types:  # pragma: no branch
                 evaluators: list[Union[tuple(evaluator_schema_types)]] = []  # pyright: ignore  # noqa: UP007
+            if report_evaluator_schema_types:  # pragma: no branch
+                report_evaluators: list[Union[tuple(report_evaluator_schema_types)]] = []  # pyright: ignore  # noqa: UP007
 
         json_schema = Dataset.model_json_schema()
         # See `_add_json_schema` below, since `$schema` is added to the JSON, it has to be supported in the JSON
@@ -885,16 +957,20 @@ class Dataset(BaseModel, Generic[InputsT, OutputT, MetadataT], extra='forbid', a
 
     @classmethod
     def _save_schema(
-        cls, path: Path | str, custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = ()
+        cls,
+        path: Path | str,
+        custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+        custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     ):
         """Save the JSON schema for this dataset type to a file.
 
         Args:
             path: Path to save the schema to.
             custom_evaluator_types: Custom evaluator classes to include in the schema.
+            custom_report_evaluator_types: Custom report evaluator classes to include in the schema.
         """
         path = Path(path)
-        json_schema = cls.model_json_schema_with_evaluators(custom_evaluator_types)
+        json_schema = cls.model_json_schema_with_evaluators(custom_evaluator_types, custom_report_evaluator_types)
         schema_content = to_json(json_schema, indent=2).decode() + '\n'
         if not path.exists() or path.read_text(encoding='utf-8') != schema_content:  # pragma: no branch
             path.write_text(schema_content, encoding='utf-8')
@@ -975,6 +1051,16 @@ evaluators: list[Evaluator[InputsT, OutputT, MetadataT]] = (
 
 List of evaluators to be used on all cases in the dataset.
 
+#### report_evaluators
+
+```python
+report_evaluators: list[
+    ReportEvaluator[InputsT, OutputT, MetadataT]
+] = []
+```
+
+Evaluators that operate on the full report to produce experiment-wide analyses.
+
 #### __init__
 
 ```python
@@ -984,6 +1070,9 @@ __init__(
     cases: Sequence[Case[InputsT, OutputT, MetadataT]],
     evaluators: Sequence[
         Evaluator[InputsT, OutputT, MetadataT]
+    ] = (),
+    report_evaluators: Sequence[
+        ReportEvaluator[InputsT, OutputT, MetadataT]
     ] = ()
 )
 ```
@@ -992,11 +1081,12 @@ Initialize a new dataset with test cases and optional evaluators.
 
 Parameters:
 
-| Name         | Type                                               | Description                                                           | Default                        |
-| ------------ | -------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------ |
-| `name`       | \`str                                              | None\`                                                                | Optional name for the dataset. |
-| `cases`      | `Sequence[Case[InputsT, OutputT, MetadataT]]`      | Sequence of test cases to include in the dataset.                     | *required*                     |
-| `evaluators` | `Sequence[Evaluator[InputsT, OutputT, MetadataT]]` | Optional sequence of evaluators to apply to all cases in the dataset. | `()`                           |
+| Name                | Type                                                     | Description                                                                    | Default                        |
+| ------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------ |
+| `name`              | \`str                                                    | None\`                                                                         | Optional name for the dataset. |
+| `cases`             | `Sequence[Case[InputsT, OutputT, MetadataT]]`            | Sequence of test cases to include in the dataset.                              | *required*                     |
+| `evaluators`        | `Sequence[Evaluator[InputsT, OutputT, MetadataT]]`       | Optional sequence of evaluators to apply to all cases in the dataset.          | `()`                           |
+| `report_evaluators` | `Sequence[ReportEvaluator[InputsT, OutputT, MetadataT]]` | Optional sequence of report evaluators that run on the full evaluation report. | `()`                           |
 
 Source code in `pydantic_evals/pydantic_evals/dataset.py`
 
@@ -1007,6 +1097,7 @@ def __init__(
     name: str | None = None,
     cases: Sequence[Case[InputsT, OutputT, MetadataT]],
     evaluators: Sequence[Evaluator[InputsT, OutputT, MetadataT]] = (),
+    report_evaluators: Sequence[ReportEvaluator[InputsT, OutputT, MetadataT]] = (),
 ):
     """Initialize a new dataset with test cases and optional evaluators.
 
@@ -1014,6 +1105,7 @@ def __init__(
         name: Optional name for the dataset.
         cases: Sequence of test cases to include in the dataset.
         evaluators: Optional sequence of evaluators to apply to all cases in the dataset.
+        report_evaluators: Optional sequence of report evaluators that run on the full evaluation report.
     """
     case_names = set[str]()
     for case in cases:
@@ -1027,6 +1119,7 @@ def __init__(
         name=name,
         cases=cases,
         evaluators=list(evaluators),
+        report_evaluators=list(report_evaluators),
     )
 ```
 
@@ -1045,7 +1138,12 @@ evaluate(
     retry_evaluators: RetryConfig | None = None,
     *,
     task_name: str | None = None,
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None,
+    repeat: int = 1,
+    lifecycle: (
+        type[CaseLifecycle[InputsT, OutputT, MetadataT]]
+        | None
+    ) = None
 ) -> EvaluationReport[InputsT, OutputT, MetadataT]
 ```
 
@@ -1055,16 +1153,18 @@ This method runs the task on each case in the dataset, applies evaluators, and c
 
 Parameters:
 
-| Name               | Type                                        | Description                                                          | Default                                                                                                                                                                                               |
-| ------------------ | ------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task`             | \`Callable\[[InputsT], Awaitable[OutputT]\] | Callable\[[InputsT], OutputT\]\`                                     | The task to evaluate. This should be a callable that takes the inputs of the case and returns the output.                                                                                             |
-| `name`             | \`str                                       | None\`                                                               | The name of the experiment being run, this is used to identify the experiment in the report. If omitted, the task_name will be used; if that is not specified, the name of the task function is used. |
-| `max_concurrency`  | \`int                                       | None\`                                                               | The maximum number of concurrent evaluations of the task to allow. If None, all cases will be evaluated concurrently.                                                                                 |
-| `progress`         | `bool`                                      | Whether to show a progress bar for the evaluation. Defaults to True. | `True`                                                                                                                                                                                                |
-| `retry_task`       | \`RetryConfig                               | None\`                                                               | Optional retry configuration for the task execution.                                                                                                                                                  |
-| `retry_evaluators` | \`RetryConfig                               | None\`                                                               | Optional retry configuration for evaluator execution.                                                                                                                                                 |
-| `task_name`        | \`str                                       | None\`                                                               | Optional override to the name of the task being executed, otherwise the name of the task function will be used.                                                                                       |
-| `metadata`         | \`dict[str, Any]                            | None\`                                                               | Optional dict of experiment metadata.                                                                                                                                                                 |
+| Name               | Type                                                 | Description                                                                                                                                                   | Default                                                                                                                                                                                               |
+| ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`             | \`Callable\[[InputsT], Awaitable[OutputT]\]          | Callable\[[InputsT], OutputT\]\`                                                                                                                              | The task to evaluate. This should be a callable that takes the inputs of the case and returns the output.                                                                                             |
+| `name`             | \`str                                                | None\`                                                                                                                                                        | The name of the experiment being run, this is used to identify the experiment in the report. If omitted, the task_name will be used; if that is not specified, the name of the task function is used. |
+| `max_concurrency`  | \`int                                                | None\`                                                                                                                                                        | The maximum number of concurrent evaluations of the task to allow. If None, all cases will be evaluated concurrently.                                                                                 |
+| `progress`         | `bool`                                               | Whether to show a progress bar for the evaluation. Defaults to True.                                                                                          | `True`                                                                                                                                                                                                |
+| `retry_task`       | \`RetryConfig                                        | None\`                                                                                                                                                        | Optional retry configuration for the task execution.                                                                                                                                                  |
+| `retry_evaluators` | \`RetryConfig                                        | None\`                                                                                                                                                        | Optional retry configuration for evaluator execution.                                                                                                                                                 |
+| `task_name`        | \`str                                                | None\`                                                                                                                                                        | Optional override to the name of the task being executed, otherwise the name of the task function will be used.                                                                                       |
+| `metadata`         | \`dict[str, Any]                                     | None\`                                                                                                                                                        | Optional dict of experiment metadata.                                                                                                                                                                 |
+| `repeat`           | `int`                                                | Number of times to run each case. When > 1, each case is run multiple times and results are grouped by the original case name for aggregation. Defaults to 1. | `1`                                                                                                                                                                                                   |
+| `lifecycle`        | \`type\[CaseLifecycle[InputsT, OutputT, MetadataT]\] | None\`                                                                                                                                                        | Optional lifecycle class for per-case setup, context preparation, and teardown hooks. A new instance is created for each case. See CaseLifecycle.                                                     |
 
 Returns:
 
@@ -1086,6 +1186,8 @@ async def evaluate(
     *,
     task_name: str | None = None,
     metadata: dict[str, Any] | None = None,
+    repeat: int = 1,
+    lifecycle: type[CaseLifecycle[InputsT, OutputT, MetadataT]] | None = None,
 ) -> EvaluationReport[InputsT, OutputT, MetadataT]:
     """Evaluates the test cases in the dataset using the given task.
 
@@ -1105,13 +1207,22 @@ async def evaluate(
         task_name: Optional override to the name of the task being executed, otherwise the name of the task
             function will be used.
         metadata: Optional dict of experiment metadata.
+        repeat: Number of times to run each case. When > 1, each case is run multiple times and
+            results are grouped by the original case name for aggregation. Defaults to 1.
+        lifecycle: Optional lifecycle class for per-case setup, context preparation, and teardown hooks.
+            A new instance is created for each case. See [`CaseLifecycle`][pydantic_evals.lifecycle.CaseLifecycle].
 
     Returns:
         A report containing the results of the evaluation.
     """
+    if repeat < 1:
+        raise ValueError(f'repeat must be >= 1, got {repeat}')
+
     task_name = task_name or get_unwrapped_function_name(task)
     name = name or task_name
-    total_cases = len(self.cases)
+
+    tasks_to_run = self._build_tasks_to_run(repeat)
+    total_tasks = len(tasks_to_run)
     progress_bar = Progress() if progress else None
 
     limiter = anyio.Semaphore(max_concurrency) if max_concurrency is not None else AsyncExitStack()
@@ -1119,6 +1230,8 @@ async def evaluate(
     extra_attributes: dict[str, Any] = {'gen_ai.operation.name': 'experiment'}
     if metadata is not None:
         extra_attributes['metadata'] = metadata
+    if repeat > 1:
+        extra_attributes['logfire.experiment.repeat'] = repeat
     with (
         logfire_span(
             'evaluate {name}',
@@ -1130,12 +1243,23 @@ async def evaluate(
         ) as eval_span,
         progress_bar or nullcontext(),
     ):
-        task_id = progress_bar.add_task(f'Evaluating {task_name}', total=total_cases) if progress_bar else None
+        task_id = progress_bar.add_task(f'Evaluating {task_name}', total=total_tasks) if progress_bar else None
 
-        async def _handle_case(case: Case[InputsT, OutputT, MetadataT], report_case_name: str):
+        async def _handle_case(
+            case: Case[InputsT, OutputT, MetadataT],
+            report_case_name: str,
+            source_case_name: str | None,
+        ):
             async with limiter:
                 result = await _run_task_and_evaluators(
-                    task, case, report_case_name, self.evaluators, retry_task, retry_evaluators
+                    task,
+                    case,
+                    report_case_name,
+                    self.evaluators,
+                    retry_task,
+                    retry_evaluators,
+                    source_case_name=source_case_name,
+                    lifecycle=lifecycle,
                 )
                 if progress_bar and task_id is not None:  # pragma: no branch
                     progress_bar.update(task_id, advance=1)
@@ -1149,8 +1273,8 @@ async def evaluate(
             span_id = f'{context.span_id:016x}'
         cases_and_failures = await task_group_gather(
             [
-                lambda case=case, i=i: _handle_case(case, case.name or f'Case {i}')
-                for i, case in enumerate(self.cases, 1)
+                lambda case=case, rn=report_name, scn=source_name: _handle_case(case, rn, scn)
+                for case, report_name, source_name in tasks_to_run
             ]
         )
         cases: list[ReportCase] = []
@@ -1168,14 +1292,17 @@ async def evaluate(
             span_id=span_id,
             trace_id=trace_id,
         )
-        full_experiment_metadata: dict[str, Any] = {'n_cases': len(self.cases)}
-        if metadata is not None:
-            full_experiment_metadata['metadata'] = metadata
-        if (averages := report.averages()) is not None:
-            full_experiment_metadata['averages'] = averages
-            if averages.assertions is not None:
-                eval_span.set_attribute('assertion_pass_rate', averages.assertions)
-        eval_span.set_attribute('logfire.experiment.metadata', full_experiment_metadata)
+
+        # Run report evaluators
+        if self.report_evaluators:
+            report_ctx = ReportEvaluatorContext(
+                name=name,
+                report=report,
+                experiment_metadata=metadata,
+            )
+            await _run_report_evaluators(self.report_evaluators, report_ctx)
+
+        _set_experiment_span_attributes(eval_span, report, metadata, len(self.cases), repeat)
     return report
 ```
 
@@ -1194,7 +1321,12 @@ evaluate_sync(
     retry_evaluators: RetryConfig | None = None,
     *,
     task_name: str | None = None,
-    metadata: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None,
+    repeat: int = 1,
+    lifecycle: (
+        type[CaseLifecycle[InputsT, OutputT, MetadataT]]
+        | None
+    ) = None
 ) -> EvaluationReport[InputsT, OutputT, MetadataT]
 ```
 
@@ -1204,16 +1336,18 @@ This is a synchronous wrapper around evaluate provided for convenience.
 
 Parameters:
 
-| Name               | Type                                        | Description                                                          | Default                                                                                                                                                                                               |
-| ------------------ | ------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task`             | \`Callable\[[InputsT], Awaitable[OutputT]\] | Callable\[[InputsT], OutputT\]\`                                     | The task to evaluate. This should be a callable that takes the inputs of the case and returns the output.                                                                                             |
-| `name`             | \`str                                       | None\`                                                               | The name of the experiment being run, this is used to identify the experiment in the report. If omitted, the task_name will be used; if that is not specified, the name of the task function is used. |
-| `max_concurrency`  | \`int                                       | None\`                                                               | The maximum number of concurrent evaluations of the task to allow. If None, all cases will be evaluated concurrently.                                                                                 |
-| `progress`         | `bool`                                      | Whether to show a progress bar for the evaluation. Defaults to True. | `True`                                                                                                                                                                                                |
-| `retry_task`       | \`RetryConfig                               | None\`                                                               | Optional retry configuration for the task execution.                                                                                                                                                  |
-| `retry_evaluators` | \`RetryConfig                               | None\`                                                               | Optional retry configuration for evaluator execution.                                                                                                                                                 |
-| `task_name`        | \`str                                       | None\`                                                               | Optional override to the name of the task being executed, otherwise the name of the task function will be used.                                                                                       |
-| `metadata`         | \`dict[str, Any]                            | None\`                                                               | Optional dict of experiment metadata.                                                                                                                                                                 |
+| Name               | Type                                                 | Description                                                                                                                                                   | Default                                                                                                                                                                                               |
+| ------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`             | \`Callable\[[InputsT], Awaitable[OutputT]\]          | Callable\[[InputsT], OutputT\]\`                                                                                                                              | The task to evaluate. This should be a callable that takes the inputs of the case and returns the output.                                                                                             |
+| `name`             | \`str                                                | None\`                                                                                                                                                        | The name of the experiment being run, this is used to identify the experiment in the report. If omitted, the task_name will be used; if that is not specified, the name of the task function is used. |
+| `max_concurrency`  | \`int                                                | None\`                                                                                                                                                        | The maximum number of concurrent evaluations of the task to allow. If None, all cases will be evaluated concurrently.                                                                                 |
+| `progress`         | `bool`                                               | Whether to show a progress bar for the evaluation. Defaults to True.                                                                                          | `True`                                                                                                                                                                                                |
+| `retry_task`       | \`RetryConfig                                        | None\`                                                                                                                                                        | Optional retry configuration for the task execution.                                                                                                                                                  |
+| `retry_evaluators` | \`RetryConfig                                        | None\`                                                                                                                                                        | Optional retry configuration for evaluator execution.                                                                                                                                                 |
+| `task_name`        | \`str                                                | None\`                                                                                                                                                        | Optional override to the name of the task being executed, otherwise the name of the task function will be used.                                                                                       |
+| `metadata`         | \`dict[str, Any]                                     | None\`                                                                                                                                                        | Optional dict of experiment metadata.                                                                                                                                                                 |
+| `repeat`           | `int`                                                | Number of times to run each case. When > 1, each case is run multiple times and results are grouped by the original case name for aggregation. Defaults to 1. | `1`                                                                                                                                                                                                   |
+| `lifecycle`        | \`type\[CaseLifecycle[InputsT, OutputT, MetadataT]\] | None\`                                                                                                                                                        | Optional lifecycle class for per-case setup, context preparation, and teardown hooks. A new instance is created for each case. See CaseLifecycle.                                                     |
 
 Returns:
 
@@ -1235,6 +1369,8 @@ def evaluate_sync(
     *,
     task_name: str | None = None,
     metadata: dict[str, Any] | None = None,
+    repeat: int = 1,
+    lifecycle: type[CaseLifecycle[InputsT, OutputT, MetadataT]] | None = None,
 ) -> EvaluationReport[InputsT, OutputT, MetadataT]:
     """Evaluates the test cases in the dataset using the given task.
 
@@ -1253,6 +1389,10 @@ def evaluate_sync(
         task_name: Optional override to the name of the task being executed, otherwise the name of the task
             function will be used.
         metadata: Optional dict of experiment metadata.
+        repeat: Number of times to run each case. When > 1, each case is run multiple times and
+            results are grouped by the original case name for aggregation. Defaults to 1.
+        lifecycle: Optional lifecycle class for per-case setup, context preparation, and teardown hooks.
+            A new instance is created for each case. See [`CaseLifecycle`][pydantic_evals.lifecycle.CaseLifecycle].
 
     Returns:
         A report containing the results of the evaluation.
@@ -1267,6 +1407,8 @@ def evaluate_sync(
             retry_evaluators=retry_evaluators,
             task_name=task_name,
             metadata=metadata,
+            repeat=repeat,
+            lifecycle=lifecycle,
         )
     )
 ```
@@ -1401,6 +1543,9 @@ from_file(
     custom_evaluator_types: Sequence[
         type[Evaluator[InputsT, OutputT, MetadataT]]
     ] = (),
+    custom_report_evaluator_types: Sequence[
+        type[ReportEvaluator[InputsT, OutputT, MetadataT]]
+    ] = (),
 ) -> Self
 ```
 
@@ -1408,11 +1553,12 @@ Load a dataset from a file.
 
 Parameters:
 
-| Name                     | Type                                                     | Description                                                                                                              | Default                                                                                                            |
-| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `path`                   | \`Path                                                   | str\`                                                                                                                    | Path to the file to load.                                                                                          |
-| `fmt`                    | \`Literal['yaml', 'json']                                | None\`                                                                                                                   | Format of the file. If None, the format will be inferred from the file extension. Must be either 'yaml' or 'json'. |
-| `custom_evaluator_types` | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]` | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones. | `()`                                                                                                               |
+| Name                            | Type                                                           | Description                                                                                                                            | Default                                                                                                            |
+| ------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `path`                          | \`Path                                                         | str\`                                                                                                                                  | Path to the file to load.                                                                                          |
+| `fmt`                           | \`Literal['yaml', 'json']                                      | None\`                                                                                                                                 | Format of the file. If None, the format will be inferred from the file extension. Must be either 'yaml' or 'json'. |
+| `custom_evaluator_types`        | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]`       | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones.               | `()`                                                                                                               |
+| `custom_report_evaluator_types` | `Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]]` | Custom report evaluator classes to use when deserializing the dataset. These are additional report evaluators beyond the default ones. | `()`                                                                                                               |
 
 Returns:
 
@@ -1436,6 +1582,7 @@ def from_file(
     path: Path | str,
     fmt: Literal['yaml', 'json'] | None = None,
     custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+    custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
 ) -> Self:
     """Load a dataset from a file.
 
@@ -1445,6 +1592,8 @@ def from_file(
             Must be either 'yaml' or 'json'.
         custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
             These are additional evaluators beyond the default ones.
+        custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+            These are additional report evaluators beyond the default ones.
 
     Returns:
         A new Dataset instance loaded from the file.
@@ -1458,7 +1607,13 @@ def from_file(
 
     raw = Path(path).read_text(encoding='utf-8')
     try:
-        return cls.from_text(raw, fmt=fmt, custom_evaluator_types=custom_evaluator_types, default_name=path.stem)
+        return cls.from_text(
+            raw,
+            fmt=fmt,
+            custom_evaluator_types=custom_evaluator_types,
+            custom_report_evaluator_types=custom_report_evaluator_types,
+            default_name=path.stem,
+        )
     except ValidationError as e:  # pragma: no cover
         raise ValueError(f'{path} contains data that does not match the schema for {cls.__name__}:\n{e}.') from e
 ```
@@ -1472,6 +1627,9 @@ from_text(
     custom_evaluator_types: Sequence[
         type[Evaluator[InputsT, OutputT, MetadataT]]
     ] = (),
+    custom_report_evaluator_types: Sequence[
+        type[ReportEvaluator[InputsT, OutputT, MetadataT]]
+    ] = (),
     *,
     default_name: str | None = None
 ) -> Self
@@ -1481,12 +1639,13 @@ Load a dataset from a string.
 
 Parameters:
 
-| Name                     | Type                                                     | Description                                                                                                              | Default                                                                              |
-| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `contents`               | `str`                                                    | The string content to parse.                                                                                             | *required*                                                                           |
-| `fmt`                    | `Literal['yaml', 'json']`                                | Format of the content. Must be either 'yaml' or 'json'.                                                                  | `'yaml'`                                                                             |
-| `custom_evaluator_types` | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]` | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones. | `()`                                                                                 |
-| `default_name`           | \`str                                                    | None\`                                                                                                                   | Default name of the dataset, to be used if not specified in the serialized contents. |
+| Name                            | Type                                                           | Description                                                                                                                            | Default                                                                              |
+| ------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `contents`                      | `str`                                                          | The string content to parse.                                                                                                           | *required*                                                                           |
+| `fmt`                           | `Literal['yaml', 'json']`                                      | Format of the content. Must be either 'yaml' or 'json'.                                                                                | `'yaml'`                                                                             |
+| `custom_evaluator_types`        | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]`       | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones.               | `()`                                                                                 |
+| `custom_report_evaluator_types` | `Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]]` | Custom report evaluator classes to use when deserializing the dataset. These are additional report evaluators beyond the default ones. | `()`                                                                                 |
+| `default_name`                  | \`str                                                          | None\`                                                                                                                                 | Default name of the dataset, to be used if not specified in the serialized contents. |
 
 Returns:
 
@@ -1509,6 +1668,7 @@ def from_text(
     contents: str,
     fmt: Literal['yaml', 'json'] = 'yaml',
     custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+    custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     *,
     default_name: str | None = None,
 ) -> Self:
@@ -1519,6 +1679,8 @@ def from_text(
         fmt: Format of the content. Must be either 'yaml' or 'json'.
         custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
             These are additional evaluators beyond the default ones.
+        custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+            These are additional report evaluators beyond the default ones.
         default_name: Default name of the dataset, to be used if not specified in the serialized contents.
 
     Returns:
@@ -1529,11 +1691,15 @@ def from_text(
     """
     if fmt == 'yaml':
         loaded = yaml.safe_load(contents)
-        return cls.from_dict(loaded, custom_evaluator_types, default_name=default_name)
+        return cls.from_dict(
+            loaded, custom_evaluator_types, custom_report_evaluator_types, default_name=default_name
+        )
     else:
         dataset_model_type = cls._serialization_type()
         dataset_model = dataset_model_type.model_validate_json(contents)
-        return cls._from_dataset_model(dataset_model, custom_evaluator_types, default_name)
+        return cls._from_dataset_model(
+            dataset_model, custom_evaluator_types, custom_report_evaluator_types, default_name
+        )
 ```
 
 #### from_dict
@@ -1544,6 +1710,9 @@ from_dict(
     custom_evaluator_types: Sequence[
         type[Evaluator[InputsT, OutputT, MetadataT]]
     ] = (),
+    custom_report_evaluator_types: Sequence[
+        type[ReportEvaluator[InputsT, OutputT, MetadataT]]
+    ] = (),
     *,
     default_name: str | None = None
 ) -> Self
@@ -1553,11 +1722,12 @@ Load a dataset from a dictionary.
 
 Parameters:
 
-| Name                     | Type                                                     | Description                                                                                                              | Default                                                               |
-| ------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `data`                   | `dict[str, Any]`                                         | Dictionary representation of the dataset.                                                                                | *required*                                                            |
-| `custom_evaluator_types` | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]` | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones. | `()`                                                                  |
-| `default_name`           | \`str                                                    | None\`                                                                                                                   | Default name of the dataset, to be used if not specified in the data. |
+| Name                            | Type                                                           | Description                                                                                                                            | Default                                                               |
+| ------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `data`                          | `dict[str, Any]`                                               | Dictionary representation of the dataset.                                                                                              | *required*                                                            |
+| `custom_evaluator_types`        | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]`       | Custom evaluator classes to use when deserializing the dataset. These are additional evaluators beyond the default ones.               | `()`                                                                  |
+| `custom_report_evaluator_types` | `Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]]` | Custom report evaluator classes to use when deserializing the dataset. These are additional report evaluators beyond the default ones. | `()`                                                                  |
+| `default_name`                  | \`str                                                          | None\`                                                                                                                                 | Default name of the dataset, to be used if not specified in the data. |
 
 Returns:
 
@@ -1579,6 +1749,7 @@ def from_dict(
     cls,
     data: dict[str, Any],
     custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+    custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
     *,
     default_name: str | None = None,
 ) -> Self:
@@ -1588,6 +1759,8 @@ def from_dict(
         data: Dictionary representation of the dataset.
         custom_evaluator_types: Custom evaluator classes to use when deserializing the dataset.
             These are additional evaluators beyond the default ones.
+        custom_report_evaluator_types: Custom report evaluator classes to use when deserializing the dataset.
+            These are additional report evaluators beyond the default ones.
         default_name: Default name of the dataset, to be used if not specified in the data.
 
     Returns:
@@ -1598,7 +1771,9 @@ def from_dict(
     """
     dataset_model_type = cls._serialization_type()
     dataset_model = dataset_model_type.model_validate(data)
-    return cls._from_dataset_model(dataset_model, custom_evaluator_types, default_name)
+    return cls._from_dataset_model(
+        dataset_model, custom_evaluator_types, custom_report_evaluator_types, default_name
+    )
 ```
 
 #### to_file
@@ -1613,6 +1788,9 @@ to_file(
     custom_evaluator_types: Sequence[
         type[Evaluator[InputsT, OutputT, MetadataT]]
     ] = (),
+    custom_report_evaluator_types: Sequence[
+        type[ReportEvaluator[InputsT, OutputT, MetadataT]]
+    ] = (),
 )
 ```
 
@@ -1620,12 +1798,13 @@ Save the dataset to a file.
 
 Parameters:
 
-| Name                     | Type                                                     | Description                                        | Default                                                                                                       |
-| ------------------------ | -------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `path`                   | \`Path                                                   | str\`                                              | Path to save the dataset to.                                                                                  |
-| `fmt`                    | \`Literal['yaml', 'json']                                | None\`                                             | Format to use. If None, the format will be inferred from the file extension. Must be either 'yaml' or 'json'. |
-| `schema_path`            | \`Path                                                   | str                                                | None\`                                                                                                        |
-| `custom_evaluator_types` | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]` | Custom evaluator classes to include in the schema. | `()`                                                                                                          |
+| Name                            | Type                                                           | Description                                               | Default                                                                                                       |
+| ------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `path`                          | \`Path                                                         | str\`                                                     | Path to save the dataset to.                                                                                  |
+| `fmt`                           | \`Literal['yaml', 'json']                                      | None\`                                                    | Format to use. If None, the format will be inferred from the file extension. Must be either 'yaml' or 'json'. |
+| `schema_path`                   | \`Path                                                         | str                                                       | None\`                                                                                                        |
+| `custom_evaluator_types`        | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]`       | Custom evaluator classes to include in the schema.        | `()`                                                                                                          |
+| `custom_report_evaluator_types` | `Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]]` | Custom report evaluator classes to include in the schema. | `()`                                                                                                          |
 
 Source code in `pydantic_evals/pydantic_evals/dataset.py`
 
@@ -1636,6 +1815,7 @@ def to_file(
     fmt: Literal['yaml', 'json'] | None = None,
     schema_path: Path | str | None = DEFAULT_SCHEMA_PATH_TEMPLATE,
     custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+    custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
 ):
     """Save the dataset to a file.
 
@@ -1646,6 +1826,7 @@ def to_file(
         schema_path: Path to save the JSON schema to. If None, no schema will be saved.
             Can be a string template with {stem} which will be replaced with the dataset filename stem.
         custom_evaluator_types: Custom evaluator classes to include in the schema.
+        custom_report_evaluator_types: Custom report evaluator classes to include in the schema.
     """
     path = Path(path)
     fmt = self._infer_fmt(path, fmt)
@@ -1662,7 +1843,7 @@ def to_file(
             schema_ref = str(_get_relative_path_reference(schema_path, path))
         else:  # pragma: no cover
             schema_ref = str(schema_path)
-        self._save_schema(schema_path, custom_evaluator_types)
+        self._save_schema(schema_path, custom_evaluator_types, custom_report_evaluator_types)
 
     context: dict[str, Any] = {'use_short_form': True}
     if fmt == 'yaml':
@@ -1685,6 +1866,9 @@ model_json_schema_with_evaluators(
     custom_evaluator_types: Sequence[
         type[Evaluator[InputsT, OutputT, MetadataT]]
     ] = (),
+    custom_report_evaluator_types: Sequence[
+        type[ReportEvaluator[InputsT, OutputT, MetadataT]]
+    ] = (),
 ) -> dict[str, Any]
 ```
 
@@ -1694,9 +1878,10 @@ This is useful for generating a schema that can be used to validate YAML-format 
 
 Parameters:
 
-| Name                     | Type                                                     | Description                                        | Default |
-| ------------------------ | -------------------------------------------------------- | -------------------------------------------------- | ------- |
-| `custom_evaluator_types` | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]` | Custom evaluator classes to include in the schema. | `()`    |
+| Name                            | Type                                                           | Description                                               | Default |
+| ------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------- | ------- |
+| `custom_evaluator_types`        | `Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]]`       | Custom evaluator classes to include in the schema.        | `()`    |
+| `custom_report_evaluator_types` | `Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]]` | Custom report evaluator classes to include in the schema. | `()`    |
 
 Returns:
 
@@ -1711,6 +1896,7 @@ Source code in `pydantic_evals/pydantic_evals/dataset.py`
 def model_json_schema_with_evaluators(
     cls,
     custom_evaluator_types: Sequence[type[Evaluator[InputsT, OutputT, MetadataT]]] = (),
+    custom_report_evaluator_types: Sequence[type[ReportEvaluator[InputsT, OutputT, MetadataT]]] = (),
 ) -> dict[str, Any]:
     """Generate a JSON schema for this dataset type, including evaluator details.
 
@@ -1718,49 +1904,19 @@ def model_json_schema_with_evaluators(
 
     Args:
         custom_evaluator_types: Custom evaluator classes to include in the schema.
+        custom_report_evaluator_types: Custom report evaluator classes to include in the schema.
 
     Returns:
         A dictionary representing the JSON schema.
     """
-    # Note: this function could maybe be simplified now that Evaluators are always dataclasses
-    registry = _get_registry(custom_evaluator_types)
-
-    evaluator_schema_types: list[Any] = []
-    for name, evaluator_class in registry.items():
-        type_hints = _typing_extra.get_function_type_hints(evaluator_class)
-        type_hints.pop('return', None)
-        required_type_hints: dict[str, Any] = {}
-
-        for p in inspect.signature(evaluator_class).parameters.values():
-            type_hints.setdefault(p.name, Any)
-            if p.default is not p.empty:
-                type_hints[p.name] = NotRequired[type_hints[p.name]]
-            else:
-                required_type_hints[p.name] = type_hints[p.name]
-
-        def _make_typed_dict(cls_name_prefix: str, fields: dict[str, Any]) -> Any:
-            td = TypedDict(f'{cls_name_prefix}_{name}', fields)  # pyright: ignore[reportArgumentType]
-            config = ConfigDict(extra='forbid', arbitrary_types_allowed=True)
-            # TODO: Replace with pydantic.with_config once pydantic 2.11 is the min supported version
-            td.__pydantic_config__ = config  # pyright: ignore[reportAttributeAccessIssue]
-            return td
-
-        # Shortest form: just the call name
-        if len(type_hints) == 0 or not required_type_hints:
-            evaluator_schema_types.append(Literal[name])
-
-        # Short form: can be called with only one parameter
-        if len(type_hints) == 1:
-            [type_hint_type] = type_hints.values()
-            evaluator_schema_types.append(_make_typed_dict('short_evaluator', {name: type_hint_type}))
-        elif len(required_type_hints) == 1:  # pragma: no branch
-            [type_hint_type] = required_type_hints.values()
-            evaluator_schema_types.append(_make_typed_dict('short_evaluator', {name: type_hint_type}))
-
-        # Long form: multiple parameters, possibly required
-        if len(type_hints) > 1:
-            params_td = _make_typed_dict('evaluator_params', type_hints)
-            evaluator_schema_types.append(_make_typed_dict('evaluator', {name: params_td}))
+    evaluator_schema_types = _build_evaluator_schema_types(
+        _get_evaluator_registry(custom_evaluator_types, Evaluator, DEFAULT_EVALUATORS, 'evaluator')
+    )
+    report_evaluator_schema_types = _build_evaluator_schema_types(
+        _get_evaluator_registry(
+            custom_report_evaluator_types, ReportEvaluator, DEFAULT_REPORT_EVALUATORS, 'report evaluator'
+        )
+    )
 
     in_type, out_type, meta_type = cls._params()
 
@@ -1778,6 +1934,8 @@ def model_json_schema_with_evaluators(
         cases: list[Case]
         if evaluator_schema_types:  # pragma: no branch
             evaluators: list[Union[tuple(evaluator_schema_types)]] = []  # pyright: ignore  # noqa: UP007
+        if report_evaluator_schema_types:  # pragma: no branch
+            report_evaluators: list[Union[tuple(report_evaluator_schema_types)]] = []  # pyright: ignore  # noqa: UP007
 
     json_schema = Dataset.model_json_schema()
     # See `_add_json_schema` below, since `$schema` is added to the JSON, it has to be supported in the JSON

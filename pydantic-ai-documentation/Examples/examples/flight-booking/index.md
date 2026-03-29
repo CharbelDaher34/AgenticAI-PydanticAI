@@ -4,7 +4,7 @@ Demonstrates:
 
 - [agent delegation](https://ai.pydantic.dev/multi-agent-applications/#agent-delegation)
 - [programmatic agent hand-off](https://ai.pydantic.dev/multi-agent-applications/#programmatic-agent-hand-off)
-- [usage limits](https://ai.pydantic.dev/agents/#usage-limits)
+- [usage limits](https://ai.pydantic.dev/agent/#usage-limits)
 
 In this scenario, a group of agents work together to find the best flight for a user.
 
@@ -94,7 +94,7 @@ class Deps:
 
 # This agent is responsible for controlling the flow of the conversation.
 search_agent = Agent[Deps, FlightDetails | NoFlightFound](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     output_type=FlightDetails | NoFlightFound,  # type: ignore
     retries=4,
     system_prompt=(
@@ -105,7 +105,7 @@ search_agent = Agent[Deps, FlightDetails | NoFlightFound](
 
 # This agent is responsible for extracting flight details from web page text.
 extraction_agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     output_type=list[FlightDetails],
     system_prompt='Extract all the flight details from the given text.',
 )
@@ -157,7 +157,7 @@ class Failed(BaseModel):
 
 # This agent is responsible for extracting the user's seat selection
 seat_preference_agent = Agent[None, SeatPreference | Failed](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     output_type=SeatPreference | Failed,
     system_prompt=(
         "Extract the user's seat preference. "
@@ -345,7 +345,7 @@ class Deps:
 
 # This agent is responsible for controlling the flow of the conversation.
 search_agent = Agent[Deps, FlightDetails | NoFlightFound](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     output_type=FlightDetails | NoFlightFound,  # type: ignore
     retries=4,
     system_prompt=(
@@ -356,7 +356,7 @@ search_agent = Agent[Deps, FlightDetails | NoFlightFound](
 
 # This agent is responsible for extracting flight details from web page text.
 extraction_agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     output_type=list[FlightDetails],
     system_prompt='Extract all the flight details from the given text.',
 )
@@ -408,7 +408,7 @@ class Failed(BaseModel):
 
 # This agent is responsible for extracting the user's seat selection
 seat_preference_agent = Agent[None, SeatPreference | Failed](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     output_type=SeatPreference | Failed,
     system_prompt=(
         "Extract the user's seat preference. "

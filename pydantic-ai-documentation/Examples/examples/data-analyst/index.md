@@ -59,7 +59,7 @@ class AnalystAgentDeps:
 
 
 analyst_agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=AnalystAgentDeps,
     instructions='You are a data analyst and your job is to analyze the data according to the user request.',
 )
@@ -171,7 +171,7 @@ class AnalystAgentDeps:
 
 
 analyst_agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=AnalystAgentDeps,
     instructions='You are a data analyst and your job is to analyze the data according to the user request.',
 )
@@ -259,8 +259,8 @@ if __name__ == '__main__':
 This example requires using a model that understands DuckDB SQL. You can check with `clai`:
 
 ```sh
-> clai -m bedrock:us.anthropic.claude-3-7-sonnet-20250219-v1:0
-clai - Pydantic AI CLI v0.0.1.dev920+41dd069 with bedrock:us.anthropic.claude-3-7-sonnet-20250219-v1:0
+> clai -m bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
+clai - Pydantic AI CLI v0.0.1.dev920+41dd069 with bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
 clai ➤ do you understand duckdb sql?
 # DuckDB SQL
 

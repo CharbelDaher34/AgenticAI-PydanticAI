@@ -1,10 +1,14 @@
 # Vercel AI Data Stream Protocol
 
-Pydantic AI natively supports the [Vercel AI Data Stream Protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#data-stream-protocol) to receive agent run input from, and stream events to, a [Vercel AI Elements](https://ai-sdk.dev/elements) frontend.
+Pydantic AI natively supports the [Vercel AI Data Stream Protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#data-stream-protocol) to receive agent run input from, and stream events to, a frontend using [AI SDK UI](https://ai-sdk.dev/docs/ai-sdk-ui/overview) hooks like [`useChat`](https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat). You can optionally use [AI Elements](https://ai-sdk.dev/elements) for pre-built UI components.
+
+Note
+
+By default, the adapter targets AI SDK v5 for backwards compatibility. To use features introduced in AI SDK v6, set `sdk_version=6` on the adapter.
 
 ## Usage
 
-The VercelAIAdapter class is responsible for transforming agent run input received from the frontend into arguments for [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents), running the agent, and then transforming Pydantic AI events into Vercel AI events. The event stream transformation is handled by the VercelAIEventStream class, but you typically won't use this directly.
+The VercelAIAdapter class is responsible for transforming agent run input received from the frontend into arguments for [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents), running the agent, and then transforming Pydantic AI events into Vercel AI events. The event stream transformation is handled by the VercelAIEventStream class, but you typically won't use this directly.
 
 If you're using a Starlette-based web framework like FastAPI, you can use the VercelAIAdapter.dispatch_request() class method from an endpoint function to directly handle a request and return a streaming response of Vercel AI events. This is demonstrated in the next section.
 
@@ -12,7 +16,7 @@ If you're using a web framework not based on Starlette (e.g. Django or Flask) or
 
 ### Usage with Starlette/FastAPI
 
-Besides the request, VercelAIAdapter.dispatch_request() takes the agent, the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents), and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional Vercel AI events.
+Besides the request, VercelAIAdapter.dispatch_request() takes the agent, the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents), and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional Vercel AI events.
 
 [Learn about Gateway](https://ai.pydantic.dev/gateway) dispatch_request.py
 
@@ -24,7 +28,7 @@ from starlette.responses import Response
 from pydantic_ai import Agent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -43,7 +47,7 @@ from starlette.responses import Response
 from pydantic_ai import Agent
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -58,7 +62,7 @@ If you're using a web framework not based on Starlette (e.g. Django or Flask) or
 
 1. The VercelAIAdapter.build_run_input() class method takes the request body as bytes and returns a Vercel AI RequestData run input object, which you can then pass to the VercelAIAdapter() constructor along with the agent.
    - You can also use the VercelAIAdapter.from_request() class method to build an adapter directly from a Starlette/FastAPI request.
-1. The VercelAIAdapter.run_stream() method runs the agent and returns a stream of Vercel AI events. It supports the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agents/#running-agents) and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional Vercel AI events.
+1. The VercelAIAdapter.run_stream() method runs the agent and returns a stream of Vercel AI events. It supports the same optional arguments as [`Agent.run_stream_events()`](https://ai.pydantic.dev/agent/#running-agents) and an optional `on_complete` callback function that receives the completed AgentRunResult and can optionally yield additional Vercel AI events.
    - You can also use VercelAIAdapter.run_stream_native() to run the agent and return a stream of Pydantic AI events instead, which can then be transformed into Vercel AI events using VercelAIAdapter.transform_stream().
 1. The VercelAIAdapter.encode_stream() method encodes the stream of Vercel AI events as SSE (HTTP Server-Sent Events) strings, which you can then return as a streaming response.
    - You can also use VercelAIAdapter.streaming_response() to generate a Starlette/FastAPI streaming response directly from the Vercel AI event stream returned by `run_stream()`.
@@ -82,7 +86,7 @@ from pydantic_ai import Agent
 from pydantic_ai.ui import SSE_CONTENT_TYPE
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -121,7 +125,7 @@ from pydantic_ai import Agent
 from pydantic_ai.ui import SSE_CONTENT_TYPE
 from pydantic_ai.ui.vercel_ai import VercelAIAdapter
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 app = FastAPI()
 
@@ -144,3 +148,89 @@ async def chat(request: Request) -> Response:
     sse_event_stream = adapter.encode_stream(event_stream)
     return StreamingResponse(sse_event_stream, media_type=accept)
 ```
+
+### Data Chunks
+
+Pydantic AI tools can send [Vercel AI data stream chunks](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol#data-stream-protocol) by returning a [`ToolReturn`](https://ai.pydantic.dev/tools-advanced/#advanced-tool-returns) object with a data-carrying chunk (or a list of chunks) as `metadata`. The supported chunk types are DataChunk, SourceUrlChunk, SourceDocumentChunk, and FileChunk. This is useful for attaching structured data to the frontend alongside the tool result, such as source URLs or custom data payloads.
+
+[Learn about Gateway](https://ai.pydantic.dev/gateway) vercel_ai_tool_chunks.py
+
+```python
+from pydantic_ai import Agent, ToolReturn
+from pydantic_ai.ui.vercel_ai.response_types import DataChunk, SourceUrlChunk
+
+agent = Agent('gateway/openai:gpt-5.2')
+
+
+@agent.tool_plain
+async def search_docs(query: str) -> ToolReturn:
+    return ToolReturn(
+        return_value=f'Found 2 results for "{query}"',
+        metadata=[
+            SourceUrlChunk(
+                source_id='doc-1',
+                url='https://example.com/docs/intro',
+                title='Introduction',
+            ),
+            DataChunk(
+                type='data-search-results',
+                data={'query': query, 'count': 2},
+            ),
+        ],
+    )
+```
+
+vercel_ai_tool_chunks.py
+
+```python
+from pydantic_ai import Agent, ToolReturn
+from pydantic_ai.ui.vercel_ai.response_types import DataChunk, SourceUrlChunk
+
+agent = Agent('openai:gpt-5.2')
+
+
+@agent.tool_plain
+async def search_docs(query: str) -> ToolReturn:
+    return ToolReturn(
+        return_value=f'Found 2 results for "{query}"',
+        metadata=[
+            SourceUrlChunk(
+                source_id='doc-1',
+                url='https://example.com/docs/intro',
+                title='Introduction',
+            ),
+            DataChunk(
+                type='data-search-results',
+                data={'query': query, 'count': 2},
+            ),
+        ],
+    )
+```
+
+Note
+
+Protocol-control chunks such as `StartChunk`, `FinishChunk`, `StartStepChunk`, or `FinishStepChunk` are automatically filtered out — only the four data-carrying chunk types listed above are forwarded to the stream and preserved in `dump_messages`.
+
+## Tool Approval
+
+Note
+
+Tool approval requires AI SDK UI v6 or later on the frontend.
+
+Pydantic AI supports human-in-the-loop tool approval workflows with AI SDK UI, allowing users to approve or deny tool executions before they run. See the [deferred tool calls documentation](https://ai.pydantic.dev/deferred-tools/#human-in-the-loop-tool-approval) for details on setting up tools that require approval.
+
+To enable tool approval streaming, pass `sdk_version=6` to `dispatch_request`:
+
+```python
+@app.post('/chat')
+async def chat(request: Request) -> Response:
+    return await VercelAIAdapter.dispatch_request(request, agent=agent, sdk_version=6)
+```
+
+When `sdk_version=6`, the adapter will:
+
+1. Emit `tool-approval-request` chunks when tools with `requires_approval=True` are called
+1. Automatically extract approval responses from follow-up requests
+1. Emit `tool-output-denied` chunks for rejected tools
+
+On the frontend, AI SDK UI's [`useChat`](https://ai-sdk.dev/docs/reference/ai-sdk-ui/use-chat) hook handles the approval flow. You can use the [`Confirmation`](https://ai-sdk.dev/elements/components/confirmation) component from AI Elements for a pre-built approval UI, or build your own using the hook's `addToolApprovalResponse` function.

@@ -42,6 +42,19 @@ class ModelProfile:
     json_schema_transformer: type[JsonSchemaTransformer] | None = None
     """The transformer to use to make JSON schemas for tools and structured output compatible with the model."""
 
+    supports_thinking: bool = False
+    """Whether the model supports thinking/reasoning configuration.
+
+    When False, the unified `thinking` setting in `ModelSettings` is silently ignored.
+    """
+
+    thinking_always_enabled: bool = False
+    """Whether the model always uses thinking/reasoning (e.g., OpenAI o-series, DeepSeek R1).
+
+    When True, `thinking=False` is silently ignored since the model cannot disable thinking.
+    Implies `supports_thinking=True`.
+    """
+
     thinking_tags: tuple[str, str] = ('<think>', '</think>')
     """The tags used to indicate thinking parts in the model's output. Defaults to ('<think>', '</think>')."""
 
@@ -157,6 +170,26 @@ json_schema_transformer: (
 
 The transformer to use to make JSON schemas for tools and structured output compatible with the model.
 
+### supports_thinking
+
+```python
+supports_thinking: bool = False
+```
+
+Whether the model supports thinking/reasoning configuration.
+
+When False, the unified `thinking` setting in `ModelSettings` is silently ignored.
+
+### thinking_always_enabled
+
+```python
+thinking_always_enabled: bool = False
+```
+
+Whether the model always uses thinking/reasoning (e.g., OpenAI o-series, DeepSeek R1).
+
+When True, `thinking=False` is silently ignored since the model cannot disable thinking. Implies `supports_thinking=True`.
+
 ### thinking_tags
 
 ```python
@@ -238,6 +271,22 @@ def update(self, profile: ModelProfile | None) -> Self:
     return replace(self, **non_default_attrs)
 ```
 
+### OPENAI_REASONING_EFFORT_MAP
+
+```python
+OPENAI_REASONING_EFFORT_MAP: dict[ThinkingLevel, str] = {
+    True: "medium",
+    False: "none",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+}
+```
+
+Maps unified thinking values to OpenAI reasoning_effort strings.
+
 ### SAMPLING_PARAMS
 
 ```python
@@ -284,16 +333,21 @@ class OpenAIModelProfile(ModelProfile):
 
     If `openai_chat_send_back_thinking_parts` is set to `'field'`, this field must be set to a non-None value."""
 
-    openai_chat_send_back_thinking_parts: Literal['tags', 'field', False] = 'tags'
+    openai_chat_send_back_thinking_parts: Literal['auto', 'tags', 'field', False] = 'auto'
     """Whether the model includes thinking content in requests.
 
     This can be:
-    * `'tags'` (default): The thinking content is included in the main `content` field, enclosed within thinking tags as
+    * `'auto'` (default): Automatically detects how to send thinking content. If thinking was received in a custom field
+    (tracked via `ThinkingPart.id` and `ThinkingPart.provider_name`), it's sent back in that same field. Otherwise,
+    it's sent using tags. Only the `reasoning` and `reasoning_content` fields are checked by
+    default when receiving responses. If your provider uses a different field name, you must explicitly set
+    `openai_chat_thinking_field` to that field name.
+    * `'tags'`: The thinking content is included in the main `content` field, enclosed within thinking tags as
     specified in `thinking_tags` profile option.
     * `'field'`: The thinking content is included in a separate field specified by `openai_chat_thinking_field`.
     * `False`: No thinking content is sent in the request.
 
-    Defaults to `'thinking_tags'` for backward compatibility reasons."""
+    Defaults to `'auto'` to ensure thinking is sent back in the format expected by the model/provider."""
 
     openai_supports_strict_tool_definition: bool = True
     """This can be set by a provider or user if the OpenAI-"compatible" API doesn't support strict tool definitions."""
@@ -309,7 +363,7 @@ class OpenAIModelProfile(ModelProfile):
     # safe to pass that value along.  Default is `True` to preserve existing
     # behaviour for OpenAI itself and most providers.
     openai_supports_tool_choice_required: bool = True
-    """Whether the provider accepts the value ``tool_choice='required'`` in the request payload."""
+    """Whether the provider accepts the value `tool_choice='required'` in the request payload."""
 
     openai_system_prompt_role: OpenAISystemPromptRole | None = None
     """The role to use for the system prompt message. If not provided, defaults to `'system'`."""
@@ -384,15 +438,15 @@ If `openai_chat_send_back_thinking_parts` is set to `'field'`, this field must b
 
 ```python
 openai_chat_send_back_thinking_parts: Literal[
-    "tags", "field", False
-] = "tags"
+    "auto", "tags", "field", False
+] = "auto"
 ```
 
 Whether the model includes thinking content in requests.
 
-This can be: * `'tags'` (default): The thinking content is included in the main `content` field, enclosed within thinking tags as specified in `thinking_tags` profile option. * `'field'`: The thinking content is included in a separate field specified by `openai_chat_thinking_field`. * `False`: No thinking content is sent in the request.
+This can be: * `'auto'` (default): Automatically detects how to send thinking content. If thinking was received in a custom field (tracked via `ThinkingPart.id` and `ThinkingPart.provider_name`), it's sent back in that same field. Otherwise, it's sent using tags. Only the `reasoning` and `reasoning_content` fields are checked by default when receiving responses. If your provider uses a different field name, you must explicitly set `openai_chat_thinking_field` to that field name. * `'tags'`: The thinking content is included in the main `content` field, enclosed within thinking tags as specified in `thinking_tags` profile option. * `'field'`: The thinking content is included in a separate field specified by `openai_chat_thinking_field`. * `False`: No thinking content is sent in the request.
 
-Defaults to `'thinking_tags'` for backward compatibility reasons.
+Defaults to `'auto'` to ensure thinking is sent back in the format expected by the model/provider.
 
 #### openai_supports_strict_tool_definition
 
@@ -521,7 +575,7 @@ Source code in `pydantic_ai_slim/pydantic_ai/profiles/openai.py`
 def openai_model_profile(model_name: str) -> ModelProfile:
     """Get the model profile for an OpenAI model."""
     # GPT-5.1+ models use `reasoning={"effort": "none"}` by default, which allows sampling params.
-    is_gpt_5_1_plus = model_name.startswith(('gpt-5.1', 'gpt-5.2'))
+    is_gpt_5_1_plus = model_name.startswith(('gpt-5.1', 'gpt-5.2', 'gpt-5.3', 'gpt-5.4'))
 
     # doesn't support `reasoning={"effort": "none"}` -  default is set at 'medium'
     # see https://platform.openai.com/docs/guides/reasoning
@@ -530,9 +584,12 @@ def openai_model_profile(model_name: str) -> ModelProfile:
     # always reasoning
     is_o_series = model_name.startswith('o')
 
-    thinking_always_enabled = is_o_series or (is_gpt_5 and 'gpt-5-chat' not in model_name)
+    # gpt-5.3-chat-latest is non-reasoning unlike other 5.1+ chat variants
+    is_gpt_5_3_chat = model_name.startswith('gpt-5.3-chat')
 
-    supports_reasoning = thinking_always_enabled or is_gpt_5_1_plus
+    thinking_always_enabled = is_o_series or (is_gpt_5 and '-chat' not in model_name)
+
+    supports_reasoning = (thinking_always_enabled or is_gpt_5_1_plus) and not is_gpt_5_3_chat
 
     # The o1-mini model doesn't support the `system` role, so we default to `user`.
     # See https://github.com/pydantic/pydantic-ai/issues/974 for more details.
@@ -540,7 +597,9 @@ def openai_model_profile(model_name: str) -> ModelProfile:
 
     # Check if the model supports web search (only specific search-preview models)
     supports_web_search = '-search-preview' in model_name
-    supports_image_output = is_gpt_5 or 'o3' in model_name or '4.1' in model_name or '4o' in model_name
+    supports_image_output = (
+        is_gpt_5 or is_gpt_5_1_plus or 'o3' in model_name or '4.1' in model_name or '4o' in model_name
+    )
 
     # Structured Outputs (output mode 'native') is only supported with the gpt-4o-mini, gpt-4o-mini-2024-07-18,
     # and gpt-4o-2024-08-06 model snapshots and later. We leave it in here for all models because the
@@ -551,11 +610,13 @@ def openai_model_profile(model_name: str) -> ModelProfile:
         supports_json_schema_output=True,
         supports_json_object_output=True,
         supports_image_output=supports_image_output,
+        supports_thinking=supports_reasoning,
+        thinking_always_enabled=thinking_always_enabled,
         openai_system_prompt_role=openai_system_prompt_role,
         openai_chat_supports_web_search=supports_web_search,
         openai_supports_encrypted_reasoning_content=supports_reasoning,
         openai_supports_reasoning=supports_reasoning,
-        openai_supports_reasoning_effort_none=is_gpt_5_1_plus,
+        openai_supports_reasoning_effort_none=is_gpt_5_1_plus and not is_gpt_5_3_chat,
     )
 ```
 
@@ -680,6 +741,74 @@ class OpenAIJsonSchemaTransformer(JsonSchemaTransformer):
         return schema
 ```
 
+### AnthropicModelProfile
+
+Bases: `ModelProfile`
+
+Profile for models used with `AnthropicModel`.
+
+ALL FIELDS MUST BE `anthropic_` PREFIXED SO YOU CAN MERGE THEM WITH OTHER MODELS.
+
+Source code in `pydantic_ai_slim/pydantic_ai/profiles/anthropic.py`
+
+```python
+@dataclass(kw_only=True)
+class AnthropicModelProfile(ModelProfile):
+    """Profile for models used with `AnthropicModel`.
+
+    ALL FIELDS MUST BE `anthropic_` PREFIXED SO YOU CAN MERGE THEM WITH OTHER MODELS.
+    """
+
+    anthropic_supports_adaptive_thinking: bool = False
+    """Whether the model supports adaptive thinking (Sonnet 4.6+, Opus 4.6+).
+
+    When True, unified `thinking` translates to `{'type': 'adaptive'}`.
+    When False, it translates to `{'type': 'enabled', 'budget_tokens': N}`.
+    """
+
+    anthropic_supports_effort: bool = False
+    """Whether the model supports the `effort` parameter in `output_config` (Opus 4.5+, Sonnet 4.6+).
+
+    When True and the unified thinking level is a string (e.g. 'high'), it is also
+    mapped to `output_config.effort`.
+    """
+```
+
+#### anthropic_supports_adaptive_thinking
+
+```python
+anthropic_supports_adaptive_thinking: bool = False
+```
+
+Whether the model supports adaptive thinking (Sonnet 4.6+, Opus 4.6+).
+
+When True, unified `thinking` translates to `{'type': 'adaptive'}`. When False, it translates to `{'type': 'enabled', 'budget_tokens': N}`.
+
+#### anthropic_supports_effort
+
+```python
+anthropic_supports_effort: bool = False
+```
+
+Whether the model supports the `effort` parameter in `output_config` (Opus 4.5+, Sonnet 4.6+).
+
+When True and the unified thinking level is a string (e.g. 'high'), it is also mapped to `output_config.effort`.
+
+### ANTHROPIC_THINKING_BUDGET_MAP
+
+```python
+ANTHROPIC_THINKING_BUDGET_MAP: dict[ThinkingLevel, int] = {
+    True: 10000,
+    "minimal": 1024,
+    "low": 2048,
+    "medium": 10000,
+    "high": 16384,
+    "xhigh": 32768,
+}
+```
+
+Maps unified thinking values to Anthropic budget_tokens for non-adaptive models.
+
 ### anthropic_model_profile
 
 ```python
@@ -698,17 +827,29 @@ def anthropic_model_profile(model_name: str) -> ModelProfile | None:
     models_that_support_json_schema_output = (
         'claude-haiku-4-5',
         'claude-sonnet-4-5',
+        'claude-sonnet-4-6',
         'claude-opus-4-1',
         'claude-opus-4-5',
+        'claude-opus-4-6',
     )
     """These models support both structured outputs and strict tool calling."""
     # TODO update when new models are released that support structured outputs
     # https://docs.claude.com/en/docs/build-with-claude/structured-outputs#example-usage
 
     supports_json_schema_output = model_name.startswith(models_that_support_json_schema_output)
-    return ModelProfile(
+
+    # Sonnet 4.6+ and Opus 4.6+ support adaptive thinking; older models use budget-based
+    supports_adaptive = model_name.startswith(('claude-sonnet-4-6', 'claude-opus-4-6'))
+
+    # Opus 4.5+ and Sonnet 4.6+ support the effort parameter in output_config
+    supports_effort = model_name.startswith(('claude-opus-4-5', 'claude-opus-4-6', 'claude-sonnet-4-6'))
+
+    return AnthropicModelProfile(
         thinking_tags=('<thinking>', '</thinking>'),
         supports_json_schema_output=supports_json_schema_output,
+        supports_thinking=True,
+        anthropic_supports_adaptive_thinking=supports_adaptive,
+        anthropic_supports_effort=supports_effort,
     )
 ```
 
@@ -733,6 +874,16 @@ class GoogleModelProfile(ModelProfile):
     google_supports_native_output_with_builtin_tools: bool = False
     """Whether the model supports native output with builtin tools.
     See https://ai.google.dev/gemini-api/docs/structured-output?example=recipe#structured_outputs_with_tools"""
+
+    google_supported_mime_types_in_tool_returns: tuple[str, ...] = ()
+    """MIME types supported in native FunctionResponseDict.parts.
+    See https://ai.google.dev/gemini-api/docs/function-calling#multimodal-function-responses"""
+
+    google_supports_thinking_level: bool = False
+    """Whether the model uses `thinking_level` (enum: LOW/MEDIUM/HIGH) instead of `thinking_budget` (int).
+
+    Gemini 3+ models use `thinking_level`; Gemini 2.5 uses `thinking_budget`.
+    """
 ```
 
 #### google_supports_native_output_with_builtin_tools
@@ -744,6 +895,26 @@ google_supports_native_output_with_builtin_tools: bool = (
 ```
 
 Whether the model supports native output with builtin tools. See https://ai.google.dev/gemini-api/docs/structured-output?example=recipe#structured_outputs_with_tools
+
+#### google_supported_mime_types_in_tool_returns
+
+```python
+google_supported_mime_types_in_tool_returns: tuple[
+    str, ...
+] = ()
+```
+
+MIME types supported in native FunctionResponseDict.parts. See https://ai.google.dev/gemini-api/docs/function-calling#multimodal-function-responses
+
+#### google_supports_thinking_level
+
+```python
+google_supports_thinking_level: bool = False
+```
+
+Whether the model uses `thinking_level` (enum: LOW/MEDIUM/HIGH) instead of `thinking_budget` (int).
+
+Gemini 3+ models use `thinking_level`; Gemini 2.5 uses `thinking_budget`.
 
 ### google_model_profile
 
@@ -762,13 +933,21 @@ def google_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Google model."""
     is_image_model = 'image' in model_name
     is_3_or_newer = 'gemini-3' in model_name
+    is_thinking_model = 'gemini-2.5' in model_name or is_3_or_newer
+    # Pro models have always-on thinking: Gemini 2.5 Pro rejects budget=0, Gemini 3+ Pro rejects MINIMAL
+    is_pro = 'pro' in model_name and 'flash' not in model_name
+    thinking_always_enabled = is_thinking_model and is_pro
     return GoogleModelProfile(
         json_schema_transformer=GoogleJsonSchemaTransformer,
         supports_image_output=is_image_model,
         supports_json_schema_output=is_3_or_newer or not is_image_model,
         supports_json_object_output=is_3_or_newer or not is_image_model,
         supports_tools=not is_image_model,
+        supports_thinking=is_thinking_model,
+        thinking_always_enabled=thinking_always_enabled,
         google_supports_native_output_with_builtin_tools=is_3_or_newer,
+        google_supported_mime_types_in_tool_returns=_GOOGLE_NATIVE_TOOL_RETURN_MIME_TYPES if is_3_or_newer else (),
+        google_supports_thinking_level=is_3_or_newer,
     )
 ```
 
@@ -876,7 +1055,12 @@ Source code in `pydantic_ai_slim/pydantic_ai/profiles/deepseek.py`
 ```python
 def deepseek_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a DeepSeek model."""
-    return ModelProfile(ignore_streamed_leading_whitespace='r1' in model_name)
+    is_r1 = 'r1' in model_name
+    return ModelProfile(
+        ignore_streamed_leading_whitespace=is_r1,
+        supports_thinking=is_r1,
+        thinking_always_enabled=is_r1,
+    )
 ```
 
 ### GrokModelProfile
@@ -935,6 +1119,8 @@ def grok_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Grok model."""
     # Grok-4 models support builtin tools
     grok_supports_builtin_tools = model_name.startswith('grok-4') or 'code' in model_name
+    # grok-3-mini supports reasoning_effort; grok-4 reasoning models always reason but don't support the parameter
+    supports_thinking_effort = model_name.startswith('grok-3-mini')
 
     # Set supported builtin tools based on model capability
     supported_builtin_tools: frozenset[type[AbstractBuiltinTool]] = (
@@ -948,6 +1134,7 @@ def grok_model_profile(model_name: str) -> ModelProfile | None:
         supports_json_schema_output=True,
         # xAI supports JSON object output
         supports_json_object_output=True,
+        supports_thinking=supports_thinking_effort,
         # Support for builtin tools (web_search, code_execution, mcp)
         grok_supports_builtin_tools=grok_supports_builtin_tools,
         supported_builtin_tools=supported_builtin_tools,
@@ -969,6 +1156,9 @@ Source code in `pydantic_ai_slim/pydantic_ai/profiles/mistral.py`
 ```python
 def mistral_model_profile(model_name: str) -> ModelProfile | None:
     """Get the model profile for a Mistral model."""
+    is_magistral = model_name.startswith('magistral')
+    if is_magistral:
+        return ModelProfile(supports_thinking=True, thinking_always_enabled=True)
     return None
 ```
 
@@ -991,6 +1181,13 @@ def qwen_model_profile(model_name: str) -> ModelProfile | None:
             openai_supports_tool_choice_required=False,
             openai_supports_strict_tool_definition=False,
             ignore_streamed_leading_whitespace=True,
+        )
+    if _QWEN_3_5_RE.search(model_name):
+        return ModelProfile(
+            json_schema_transformer=InlineDefsJsonSchemaTransformer,
+            ignore_streamed_leading_whitespace=True,
+            supports_json_schema_output=True,
+            supports_json_object_output=True,
         )
     return ModelProfile(
         json_schema_transformer=InlineDefsJsonSchemaTransformer,

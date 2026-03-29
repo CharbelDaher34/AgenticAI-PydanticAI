@@ -14,6 +14,9 @@ The Agent class has full API documentation, but conceptually you can think of an
 | [Dependency type constraint](https://ai.pydantic.dev/dependencies/index.md)                                          | Dynamic instructions functions, tools, and output functions may all use dependencies when they're run.    |
 | [LLM model](https://ai.pydantic.dev/api/models/base/index.md)                                                        | Optional default LLM model associated with the agent. Can also be specified when running the agent.       |
 | [Model Settings](#additional-configuration)                                                                          | Optional default model settings to help fine tune requests. Can also be specified when running the agent. |
+| [Capabilities](https://ai.pydantic.dev/capabilities/index.md)                                                        | Reusable bundles of tools, hooks, instructions, and model settings that extend agent behavior.            |
+
+While each of these can be configured individually, [capabilities](https://ai.pydantic.dev/capabilities/index.md) let you bundle related behavior into reusable units that are easier to compose, share, and [load from configuration files](https://ai.pydantic.dev/agent-spec/index.md).
 
 In typing terms, agents are generic in their dependency and output types, e.g., an agent which required dependencies of type `Foobar` and produced outputs of type `list[str]` would have type `Agent[Foobar, list[str]]`. In practice, you shouldn't need to care about this, it should just mean your IDE can tell you when you have the right type, and if you choose to use [static type checking](#static-type-checking) it should work well with Pydantic AI.
 
@@ -25,7 +28,7 @@ Here's a toy example of an agent that simulates a roulette wheel:
 from pydantic_ai import Agent, RunContext
 
 roulette_agent = Agent(  # (1)!
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=int,
     output_type=bool,
     system_prompt=(
@@ -63,7 +66,7 @@ roulette_wheel.py
 from pydantic_ai import Agent, RunContext
 
 roulette_agent = Agent(  # (1)!
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=int,
     output_type=bool,
     system_prompt=(
@@ -116,7 +119,7 @@ Here's a simple example demonstrating the first four:
 ```python
 from pydantic_ai import Agent, AgentRunResultEvent, AgentStreamEvent
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 result_sync = agent.run_sync('What is the capital of Italy?')
 print(result_sync.output)
@@ -160,7 +163,7 @@ run_agent.py
 ```python
 from pydantic_ai import Agent, AgentRunResultEvent, AgentStreamEvent
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 result_sync = agent.run_sync('What is the capital of Italy?')
 print(result_sync.output)
@@ -239,7 +242,7 @@ from pydantic_ai import (
 )
 
 weather_agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     system_prompt='Providing a weather forecast at the locations the user provides.',
 )
 
@@ -335,7 +338,7 @@ from pydantic_ai import (
 )
 
 weather_agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     system_prompt='Providing a weather forecast at the locations the user provides.',
 )
 
@@ -482,7 +485,7 @@ Here's an example of using `async for` with `iter` to record each node the agent
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 
 async def main():
@@ -518,7 +521,7 @@ async def main():
             model_response=ModelResponse(
                 parts=[TextPart(content='The capital of France is Paris.')],
                 usage=RequestUsage(input_tokens=56, output_tokens=7),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             )
@@ -535,7 +538,7 @@ agent_iter_async_for.py
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 
 async def main():
@@ -571,7 +574,7 @@ async def main():
             model_response=ModelResponse(
                 parts=[TextPart(content='The capital of France is Paris.')],
                 usage=RequestUsage(input_tokens=56, output_tokens=7),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             )
@@ -598,7 +601,7 @@ You can also drive the iteration manually by passing the node you want to run ne
 from pydantic_ai import Agent
 from pydantic_graph import End
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 
 async def main():
@@ -638,7 +641,7 @@ async def main():
                 model_response=ModelResponse(
                     parts=[TextPart(content='The capital of France is Paris.')],
                     usage=RequestUsage(input_tokens=56, output_tokens=7),
-                    model_name='gpt-5',
+                    model_name='gpt-5.2',
                     timestamp=datetime.datetime(...),
                     run_id='...',
                 )
@@ -659,7 +662,7 @@ agent_iter_next.py
 from pydantic_ai import Agent
 from pydantic_graph import End
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 
 async def main():
@@ -699,7 +702,7 @@ async def main():
                 model_response=ModelResponse(
                     parts=[TextPart(content='The capital of France is Paris.')],
                     usage=RequestUsage(input_tokens=56, output_tokens=7),
-                    model_name='gpt-5',
+                    model_name='gpt-5.2',
                     timestamp=datetime.datetime(...),
                     run_id='...',
                 )
@@ -759,7 +762,7 @@ class WeatherService:
 
 
 weather_agent = Agent[WeatherService, str](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=WeatherService,
     output_type=str,  # We'll produce a final answer as plain text
     system_prompt='Providing a weather forecast at the locations the user provides.',
@@ -889,7 +892,7 @@ Consider the following example, where we limit the number of response tokens:
 ```python
 from pydantic_ai import Agent, UsageLimitExceeded, UsageLimits
 
-agent = Agent('gateway/anthropic:claude-sonnet-4-5')
+agent = Agent('gateway/anthropic:claude-sonnet-4-6')
 
 result_sync = agent.run_sync(
     'What is the capital of Italy? Answer with just the city.',
@@ -913,7 +916,7 @@ except UsageLimitExceeded as e:
 ```python
 from pydantic_ai import Agent, UsageLimitExceeded, UsageLimits
 
-agent = Agent('anthropic:claude-sonnet-4-5')
+agent = Agent('anthropic:claude-sonnet-4-6')
 
 result_sync = agent.run_sync(
     'What is the capital of Italy? Answer with just the city.',
@@ -953,7 +956,7 @@ class NeverOutputType(TypedDict):
 
 
 agent = Agent(
-    'gateway/anthropic:claude-sonnet-4-5',
+    'gateway/anthropic:claude-sonnet-4-6',
     retries=3,
     output_type=NeverOutputType,
     system_prompt='Any time you get a response, call the `infinite_retry_tool` to produce another response.',
@@ -992,7 +995,7 @@ class NeverOutputType(TypedDict):
 
 
 agent = Agent(
-    'anthropic:claude-sonnet-4-5',
+    'anthropic:claude-sonnet-4-6',
     retries=3,
     output_type=NeverOutputType,
     system_prompt='Any time you get a response, call the `infinite_retry_tool` to produce another response.',
@@ -1027,7 +1030,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
-agent = Agent('gateway/anthropic:claude-sonnet-4-5')
+agent = Agent('gateway/anthropic:claude-sonnet-4-6')
 
 @agent.tool_plain
 def do_work() -> str:
@@ -1046,7 +1049,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
-agent = Agent('anthropic:claude-sonnet-4-5')
+agent = Agent('anthropic:claude-sonnet-4-6')
 
 @agent.tool_plain
 def do_work() -> str:
@@ -1083,7 +1086,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 
 # 1. Model-level defaults
 model = OpenAIChatModel(
-    'gpt-5',
+    'gpt-5.2',
     settings=ModelSettings(temperature=0.8, max_tokens=500)  # Base defaults
 )
 
@@ -1100,6 +1103,30 @@ print(result_sync.output)
 ```
 
 The final request uses `temperature=0.0` (run-time), `max_tokens=500` (from model), demonstrating how settings merge with run-time taking precedence.
+
+##### Dynamic model settings
+
+Both agent-level and run-level `model_settings` accept a callable that receives a RunContext and returns ModelSettings. The callable is invoked before each model request, so settings can vary per step. The current resolved settings so far are available via `ctx.model_settings` inside the callable.
+
+Settings are resolved in layers, each merged on top of the previous:
+
+1. **Model defaults** (`model.settings`)
+1. **Agent-level** (`Agent(model_settings=...)`)
+1. **Capability-level** (e.g. from Thinking() — see [Capabilities](https://ai.pydantic.dev/capabilities/#providing-model-settings))
+1. **Run-level** (`agent.run(model_settings=...)`)
+
+Inside a callable, `ctx.model_settings` contains the merged result of all *previous* layers (position-dependent). For example, an agent-level callable sees only model defaults, while a run-level callable sees model defaults + agent-level + capability-level settings. To reset a field set by a previous layer, set it explicitly (e.g. `{'temperature': None}`).
+
+```python
+from pydantic_ai import Agent, ModelSettings
+
+agent = Agent(
+    'test',
+    model_settings=lambda ctx: ModelSettings(
+        temperature=0.0 if ctx.run_step <= 1 else 0.7,
+    ),
+)
+```
 
 Model Settings Support
 
@@ -1125,7 +1152,7 @@ class Deps:
 
 
 agent = Agent[Deps](
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=Deps,
     metadata=lambda ctx: {'tenant': ctx.deps.tenant},  # agent-level metadata
 )
@@ -1141,6 +1168,68 @@ print(result.metadata)
 #> {'tenant': 'tenant-123', 'num_requests': 1}
 ```
 
+#### Concurrency Limiting
+
+You can limit the number of concurrent agent runs using the `max_concurrency` parameter. This is useful when you want to prevent overwhelming external resources or enforce rate limits when running many agent instances in parallel.
+
+[Learn about Gateway](https://ai.pydantic.dev/gateway) agent_concurrency.py
+
+```python
+import asyncio
+
+from pydantic_ai import Agent, ConcurrencyLimit
+
+# Simple limit: allow up to 10 concurrent runs
+agent = Agent('gateway/openai:gpt-5', max_concurrency=10)
+
+
+# With backpressure: limit concurrent runs and queue depth
+agent_with_backpressure = Agent(
+    'gateway/openai:gpt-5',
+    max_concurrency=ConcurrencyLimit(max_running=10, max_queued=100),
+)
+
+
+async def main():
+    # These will be rate-limited to 10 concurrent runs
+    results = await asyncio.gather(
+        *[agent.run(f'Question {i}') for i in range(20)]
+    )
+    print(len(results))
+    #> 20
+```
+
+agent_concurrency.py
+
+```python
+import asyncio
+
+from pydantic_ai import Agent, ConcurrencyLimit
+
+# Simple limit: allow up to 10 concurrent runs
+agent = Agent('openai:gpt-5', max_concurrency=10)
+
+
+# With backpressure: limit concurrent runs and queue depth
+agent_with_backpressure = Agent(
+    'openai:gpt-5',
+    max_concurrency=ConcurrencyLimit(max_running=10, max_queued=100),
+)
+
+
+async def main():
+    # These will be rate-limited to 10 concurrent runs
+    results = await asyncio.gather(
+        *[agent.run(f'Question {i}') for i in range(20)]
+    )
+    print(len(results))
+    #> 20
+```
+
+When the concurrency limit is reached, additional calls to agent.run() or agent.iter() will wait until a slot becomes available. If you configure `max_queued` and the queue fills up, a ConcurrencyLimitExceeded exception is raised.
+
+When instrumentation is enabled, waiting operations appear as "waiting for concurrency" spans with attributes showing queue depth and limits.
+
 ### Model specific settings
 
 If you wish to further customize model behavior, you can use a subclass of ModelSettings, like GoogleModelSettings, associated with your model of choice.
@@ -1153,7 +1242,7 @@ For example:
 from pydantic_ai import Agent, UnexpectedModelBehavior
 from pydantic_ai.models.google import GoogleModelSettings
 
-agent = Agent('gateway/gemini:gemini-2.5-flash')
+agent = Agent('gateway/gemini:gemini-3-flash-preview')
 
 try:
     result = agent.run_sync(
@@ -1186,7 +1275,7 @@ except UnexpectedModelBehavior as e:
 from pydantic_ai import Agent, UnexpectedModelBehavior
 from pydantic_ai.models.google import GoogleModelSettings
 
-agent = Agent('google-gla:gemini-2.5-flash')
+agent = Agent('google-gla:gemini-3-flash-preview')
 
 try:
     result = agent.run_sync(
@@ -1226,7 +1315,7 @@ Here's an example of a conversation comprised of multiple runs:
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 # First run
 result1 = agent.run_sync('Who was Albert Einstein?')
@@ -1249,7 +1338,7 @@ conversation_example.py
 ```python
 from pydantic_ai import Agent
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 # First run
 result1 = agent.run_sync('Who was Albert Einstein?')
@@ -1362,7 +1451,7 @@ from datetime import date
 from pydantic_ai import Agent, RunContext
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=str,  # (1)!
     system_prompt="Use the customer's name while replying to them.",  # (2)!
 )
@@ -1396,7 +1485,7 @@ from datetime import date
 from pydantic_ai import Agent, RunContext
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=str,  # (1)!
     system_prompt="Use the customer's name while replying to them.",  # (2)!
 )
@@ -1439,7 +1528,7 @@ Instructions, like system prompts, can be specified at different times:
 
 1. **Static instructions**: These are known when writing the code and can be defined via the `instructions` parameter of the Agent constructor.
 1. **Dynamic instructions**: These rely on context that is only available at runtime and should be defined using functions decorated with @agent.instructions. Unlike dynamic system prompts, which may be reused when `message_history` is present, dynamic instructions are always reevaluated.
-1. \**Runtime instructions*: These are additional instructions for a specific run that can be passed to one of the [run methods](#running-agents) using the `instructions` argument.
+1. **Runtime instructions**: These are additional instructions for a specific run that can be passed to one of the [run methods](#running-agents) using the `instructions` argument.
 
 All three types of instructions can be added to a single agent, and they are appended in the order they are defined at runtime.
 
@@ -1453,7 +1542,7 @@ from datetime import date
 from pydantic_ai import Agent, RunContext
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=str,  # (1)!
     instructions="Use the customer's name while replying to them.",  # (2)!
 )
@@ -1487,7 +1576,7 @@ from datetime import date
 from pydantic_ai import Agent, RunContext
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=str,  # (1)!
     instructions="Use the customer's name while replying to them.",  # (2)!
 )
@@ -1517,6 +1606,8 @@ print(result.output)
 
 Note that returning an empty string will result in no instruction message added.
 
+Instructions can also come from [capabilities](https://ai.pydantic.dev/capabilities/index.md) via get_instructions(), or from [template strings](https://ai.pydantic.dev/agent-spec/#template-strings) rendered against the agent's dependencies.
+
 ## Reflection and self-correction
 
 Validation errors from both function tool parameter validation and [structured output validation](https://ai.pydantic.dev/output/#structured-output) can be passed back to the model with a request to retry.
@@ -1524,7 +1615,7 @@ Validation errors from both function tool parameter validation and [structured o
 You can also raise ModelRetry from within a [tool](https://ai.pydantic.dev/tools/index.md) or [output function](https://ai.pydantic.dev/output/#output-functions) to tell the model it should retry generating a response.
 
 - The default retry count is **1** but can be altered for the entire agent, a specific tool, or outputs.
-- You can access the current retry count from within a tool or output function via ctx.retry.
+- You can access the current retry count from within a tool, output validator, or output function via ctx.retry.
 
 Here's an example:
 
@@ -1544,7 +1635,7 @@ class ChatResult(BaseModel):
 
 
 agent = Agent(
-    'gateway/openai:gpt-5',
+    'gateway/openai:gpt-5.2',
     deps_type=DatabaseConn,
     output_type=ChatResult,
 )
@@ -1589,7 +1680,7 @@ class ChatResult(BaseModel):
 
 
 agent = Agent(
-    'openai:gpt-5',
+    'openai:gpt-5.2',
     deps_type=DatabaseConn,
     output_type=ChatResult,
 )
@@ -1684,7 +1775,7 @@ In these cases, capture_run_messages can be used to access the messages exchange
 ```python
 from pydantic_ai import Agent, ModelRetry, UnexpectedModelBehavior, capture_run_messages
 
-agent = Agent('gateway/openai:gpt-5')
+agent = Agent('gateway/openai:gpt-5.2')
 
 
 @agent.tool_plain
@@ -1726,7 +1817,7 @@ with capture_run_messages() as messages:  # (2)!
                     )
                 ],
                 usage=RequestUsage(input_tokens=62, output_tokens=4),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             ),
@@ -1751,7 +1842,7 @@ with capture_run_messages() as messages:  # (2)!
                     )
                 ],
                 usage=RequestUsage(input_tokens=72, output_tokens=8),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             ),
@@ -1769,7 +1860,7 @@ agent_model_errors.py
 ```python
 from pydantic_ai import Agent, ModelRetry, UnexpectedModelBehavior, capture_run_messages
 
-agent = Agent('openai:gpt-5')
+agent = Agent('openai:gpt-5.2')
 
 
 @agent.tool_plain
@@ -1811,7 +1902,7 @@ with capture_run_messages() as messages:  # (2)!
                     )
                 ],
                 usage=RequestUsage(input_tokens=62, output_tokens=4),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             ),
@@ -1836,7 +1927,7 @@ with capture_run_messages() as messages:  # (2)!
                     )
                 ],
                 usage=RequestUsage(input_tokens=72, output_tokens=8),
-                model_name='gpt-5',
+                model_name='gpt-5.2',
                 timestamp=datetime.datetime(...),
                 run_id='...',
             ),
@@ -1854,3 +1945,24 @@ with capture_run_messages() as messages:  # (2)!
 Note
 
 If you call run, run_sync, or run_stream more than once within a single `capture_run_messages` context, `messages` will represent the messages exchanged during the first call only.
+
+## Agent Specs
+
+Agents can also be defined declaratively in YAML or JSON using [agent specs](https://ai.pydantic.dev/agent-spec/index.md). This separates agent configuration from application code:
+
+```yaml
+model: anthropic:claude-opus-4-6
+instructions: You are a helpful assistant.
+capabilities:
+  - WebSearch
+  - Thinking:
+      effort: high
+```
+
+```python
+from pydantic_ai import Agent
+
+agent = Agent.from_file('agent.yaml')
+```
+
+See [Agent Specs](https://ai.pydantic.dev/agent-spec/index.md) for the full spec format, template strings, and custom capability registration.

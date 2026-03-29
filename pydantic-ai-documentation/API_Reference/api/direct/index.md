@@ -262,7 +262,7 @@ from pydantic_ai.direct import model_request_stream
 
 async def main():
     messages = [ModelRequest.user_text_prompt('Who was Albert Einstein?')]  # (1)!
-    async with model_request_stream('openai:gpt-4.1-mini', messages) as stream:
+    async with model_request_stream('openai:gpt-5-mini', messages) as stream:
         chunks = []
         async for chunk in stream:
             chunks.append(chunk)
@@ -324,7 +324,7 @@ def model_request_stream(
 
     async def main():
         messages = [ModelRequest.user_text_prompt('Who was Albert Einstein?')]  # (1)!
-        async with model_request_stream('openai:gpt-4.1-mini', messages) as stream:
+        async with model_request_stream('openai:gpt-5-mini', messages) as stream:
             chunks = []
             async for chunk in stream:
                 chunks.append(chunk)
@@ -394,7 +394,7 @@ from pydantic_ai import ModelRequest
 from pydantic_ai.direct import model_request_stream_sync
 
 messages = [ModelRequest.user_text_prompt('Who was Albert Einstein?')]
-with model_request_stream_sync('openai:gpt-4.1-mini', messages) as stream:
+with model_request_stream_sync('openai:gpt-5-mini', messages) as stream:
     chunks = []
     for chunk in stream:
         chunks.append(chunk)
@@ -455,7 +455,7 @@ def model_request_stream_sync(
     from pydantic_ai.direct import model_request_stream_sync
 
     messages = [ModelRequest.user_text_prompt('Who was Albert Einstein?')]
-    with model_request_stream_sync('openai:gpt-4.1-mini', messages) as stream:
+    with model_request_stream_sync('openai:gpt-5-mini', messages) as stream:
         chunks = []
         for chunk in stream:
             chunks.append(chunk)

@@ -109,13 +109,18 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
 
     @classmethod
     async def from_request(
-        cls, request: Request, *, agent: AbstractAgent[AgentDepsT, OutputDataT]
-    ) -> UIAdapter[RunInputT, MessageT, EventT, AgentDepsT, OutputDataT]:
-        """Create an adapter from a request."""
+        cls, request: Request, *, agent: AbstractAgent[AgentDepsT, OutputDataT], **kwargs: Any
+    ) -> Self:
+        """Create an adapter from a request.
+
+        Extra keyword arguments are forwarded to the adapter constructor, allowing subclasses
+        to accept additional adapter-specific parameters.
+        """
         return cls(
             agent=agent,
             run_input=cls.build_run_input(await request.body()),
             accept=request.headers.get('accept'),
+            **kwargs,
         )
 
     @classmethod
@@ -156,6 +161,11 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         """Frontend state from the protocol-specific run input."""
         return None
 
+    @cached_property
+    def deferred_tool_results(self) -> DeferredToolResults | None:
+        """Deferred tool results extracted from the request, used for tool approval workflows."""
+        return None
+
     def transform_stream(
         self,
         stream: AsyncIterator[NativeEvent],
@@ -193,7 +203,7 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         message_history: Sequence[ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         model: Model | KnownModelName | str | None = None,
-        instructions: Instructions[AgentDepsT] = None,
+        instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = None,
         model_settings: ModelSettings | None = None,
         usage_limits: UsageLimits | None = None,
@@ -228,6 +238,9 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         if toolset:
             output_type = [output_type or self.agent.output_type, DeferredToolRequests]
             toolsets = [*(toolsets or []), toolset]
+
+        if deferred_tool_results is None:
+            deferred_tool_results = self.deferred_tool_results
 
         if isinstance(deps, StateHandler):
             raw_state = self.state or {}
@@ -267,7 +280,7 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         message_history: Sequence[ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         model: Model | KnownModelName | str | None = None,
-        instructions: Instructions[AgentDepsT] = None,
+        instructions: _instructions.AgentInstructions[AgentDepsT] = None,
         deps: AgentDepsT = None,
         model_settings: ModelSettings | None = None,
         usage_limits: UsageLimits | None = None,
@@ -327,7 +340,7 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         message_history: Sequence[ModelMessage] | None = None,
         deferred_tool_results: DeferredToolResults | None = None,
         model: Model | KnownModelName | str | None = None,
-        instructions: Instructions[DispatchDepsT] = None,
+        instructions: _instructions.AgentInstructions[DispatchDepsT] = None,
         deps: DispatchDepsT = None,
         output_type: OutputSpec[Any] | None = None,
         model_settings: ModelSettings | None = None,
@@ -338,8 +351,12 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
         toolsets: Sequence[AbstractToolset[DispatchDepsT]] | None = None,
         builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
         on_complete: OnCompleteFunc[EventT] | None = None,
+        **kwargs: Any,
     ) -> Response:
         """Handle a protocol-specific HTTP request by running the agent and returning a streaming response of protocol-specific events.
+
+        Extra keyword arguments are forwarded to [`from_request`][pydantic_ai.ui.UIAdapter.from_request],
+        allowing subclasses to accept additional adapter-specific parameters.
 
         Args:
             request: The incoming Starlette/FastAPI request.
@@ -361,6 +378,7 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
             builtin_tools: Optional additional builtin tools to use for this run.
             on_complete: Optional callback function called when the agent run completes successfully.
                 The callback receives the completed [`AgentRunResult`][pydantic_ai.agent.AgentRunResult] and can optionally yield additional protocol-specific events.
+            **kwargs: Additional keyword arguments forwarded to [`from_request`][pydantic_ai.ui.UIAdapter.from_request].
 
         Returns:
             A streaming Starlette response with protocol-specific events encoded per the request's `Accept` header value.
@@ -377,7 +395,7 @@ class UIAdapter(ABC, Generic[RunInputT, MessageT, EventT, AgentDepsT, OutputData
             # The DepsT and OutputDataT come from `agent`, not from `cls`; the cast is necessary to explain this to pyright
             adapter = cast(
                 UIAdapter[RunInputT, MessageT, EventT, DispatchDepsT, DispatchOutputDataT],
-                await cls.from_request(request, agent=cast(AbstractAgent[AgentDepsT, OutputDataT], agent)),
+                await cls.from_request(request, agent=cast(AbstractAgent[AgentDepsT, OutputDataT], agent), **kwargs),
             )
         except ValidationError as e:  # pragma: no cover
             return Response(
@@ -436,26 +454,32 @@ The `Accept` header value of the request, used to determine how to encode the pr
 from_request(
     request: Request,
     *,
-    agent: AbstractAgent[AgentDepsT, OutputDataT]
-) -> UIAdapter[
-    RunInputT, MessageT, EventT, AgentDepsT, OutputDataT
-]
+    agent: AbstractAgent[AgentDepsT, OutputDataT],
+    **kwargs: Any
+) -> Self
 ```
 
 Create an adapter from a request.
+
+Extra keyword arguments are forwarded to the adapter constructor, allowing subclasses to accept additional adapter-specific parameters.
 
 Source code in `pydantic_ai_slim/pydantic_ai/ui/_adapter.py`
 
 ```python
 @classmethod
 async def from_request(
-    cls, request: Request, *, agent: AbstractAgent[AgentDepsT, OutputDataT]
-) -> UIAdapter[RunInputT, MessageT, EventT, AgentDepsT, OutputDataT]:
-    """Create an adapter from a request."""
+    cls, request: Request, *, agent: AbstractAgent[AgentDepsT, OutputDataT], **kwargs: Any
+) -> Self:
+    """Create an adapter from a request.
+
+    Extra keyword arguments are forwarded to the adapter constructor, allowing subclasses
+    to accept additional adapter-specific parameters.
+    """
     return cls(
         agent=agent,
         run_input=cls.build_run_input(await request.body()),
         accept=request.headers.get('accept'),
+        **kwargs,
     )
 ```
 
@@ -561,6 +585,14 @@ state: dict[str, Any] | None
 
 Frontend state from the protocol-specific run input.
 
+#### deferred_tool_results
+
+```python
+deferred_tool_results: DeferredToolResults | None
+```
+
+Deferred tool results extracted from the request, used for tool approval workflows.
+
 #### transform_stream
 
 ```python
@@ -664,7 +696,7 @@ run_stream_native(
         DeferredToolResults | None
     ) = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[AgentDepsT] = None,
+    instructions: AgentInstructions[AgentDepsT] = None,
     deps: AgentDepsT = None,
     model_settings: ModelSettings | None = None,
     usage_limits: UsageLimits | None = None,
@@ -690,7 +722,7 @@ Parameters:
 | `message_history`       | \`Sequence[ModelMessage]                  | None\`                                                                      | History of the conversation so far.                                                                                                                                                               |
 | `deferred_tool_results` | \`DeferredToolResults                     | None\`                                                                      | Optional results for deferred tool calls in the message history.                                                                                                                                  |
 | `model`                 | \`Model                                   | KnownModelName                                                              | str                                                                                                                                                                                               |
-| `instructions`          | `Instructions[AgentDepsT]`                | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
+| `instructions`          | `AgentInstructions[AgentDepsT]`           | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
 | `deps`                  | `AgentDepsT`                              | Optional dependencies to use for this run.                                  | `None`                                                                                                                                                                                            |
 | `model_settings`        | \`ModelSettings                           | None\`                                                                      | Optional settings to use for this model's request.                                                                                                                                                |
 | `usage_limits`          | \`UsageLimits                             | None\`                                                                      | Optional limits on model request count or token usage.                                                                                                                                            |
@@ -710,7 +742,7 @@ def run_stream_native(
     message_history: Sequence[ModelMessage] | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[AgentDepsT] = None,
+    instructions: _instructions.AgentInstructions[AgentDepsT] = None,
     deps: AgentDepsT = None,
     model_settings: ModelSettings | None = None,
     usage_limits: UsageLimits | None = None,
@@ -745,6 +777,9 @@ def run_stream_native(
     if toolset:
         output_type = [output_type or self.agent.output_type, DeferredToolRequests]
         toolsets = [*(toolsets or []), toolset]
+
+    if deferred_tool_results is None:
+        deferred_tool_results = self.deferred_tool_results
 
     if isinstance(deps, StateHandler):
         raw_state = self.state or {}
@@ -789,7 +824,7 @@ run_stream(
         DeferredToolResults | None
     ) = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[AgentDepsT] = None,
+    instructions: AgentInstructions[AgentDepsT] = None,
     deps: AgentDepsT = None,
     model_settings: ModelSettings | None = None,
     usage_limits: UsageLimits | None = None,
@@ -816,7 +851,7 @@ Parameters:
 | `message_history`       | \`Sequence[ModelMessage]                  | None\`                                                                      | History of the conversation so far.                                                                                                                                                               |
 | `deferred_tool_results` | \`DeferredToolResults                     | None\`                                                                      | Optional results for deferred tool calls in the message history.                                                                                                                                  |
 | `model`                 | \`Model                                   | KnownModelName                                                              | str                                                                                                                                                                                               |
-| `instructions`          | `Instructions[AgentDepsT]`                | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
+| `instructions`          | `AgentInstructions[AgentDepsT]`           | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
 | `deps`                  | `AgentDepsT`                              | Optional dependencies to use for this run.                                  | `None`                                                                                                                                                                                            |
 | `model_settings`        | \`ModelSettings                           | None\`                                                                      | Optional settings to use for this model's request.                                                                                                                                                |
 | `usage_limits`          | \`UsageLimits                             | None\`                                                                      | Optional limits on model request count or token usage.                                                                                                                                            |
@@ -837,7 +872,7 @@ def run_stream(
     message_history: Sequence[ModelMessage] | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[AgentDepsT] = None,
+    instructions: _instructions.AgentInstructions[AgentDepsT] = None,
     deps: AgentDepsT = None,
     model_settings: ModelSettings | None = None,
     usage_limits: UsageLimits | None = None,
@@ -903,7 +938,7 @@ dispatch_request(
         DeferredToolResults | None
     ) = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[DispatchDepsT] = None,
+    instructions: AgentInstructions[DispatchDepsT] = None,
     deps: DispatchDepsT = None,
     output_type: OutputSpec[Any] | None = None,
     model_settings: ModelSettings | None = None,
@@ -917,11 +952,14 @@ dispatch_request(
     builtin_tools: (
         Sequence[AbstractBuiltinTool] | None
     ) = None,
-    on_complete: OnCompleteFunc[EventT] | None = None
+    on_complete: OnCompleteFunc[EventT] | None = None,
+    **kwargs: Any
 ) -> Response
 ```
 
 Handle a protocol-specific HTTP request by running the agent and returning a streaming response of protocol-specific events.
+
+Extra keyword arguments are forwarded to from_request, allowing subclasses to accept additional adapter-specific parameters.
 
 Parameters:
 
@@ -933,7 +971,7 @@ Parameters:
 | `message_history`       | \`Sequence[ModelMessage]                            | None\`                                                                      | History of the conversation so far.                                                                                                                                                               |
 | `deferred_tool_results` | \`DeferredToolResults                               | None\`                                                                      | Optional results for deferred tool calls in the message history.                                                                                                                                  |
 | `model`                 | \`Model                                             | KnownModelName                                                              | str                                                                                                                                                                                               |
-| `instructions`          | `Instructions[DispatchDepsT]`                       | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
+| `instructions`          | `AgentInstructions[DispatchDepsT]`                  | Optional additional instructions to use for this run.                       | `None`                                                                                                                                                                                            |
 | `deps`                  | `DispatchDepsT`                                     | Optional dependencies to use for this run.                                  | `None`                                                                                                                                                                                            |
 | `model_settings`        | \`ModelSettings                                     | None\`                                                                      | Optional settings to use for this model's request.                                                                                                                                                |
 | `usage_limits`          | \`UsageLimits                                       | None\`                                                                      | Optional limits on model request count or token usage.                                                                                                                                            |
@@ -943,6 +981,7 @@ Parameters:
 | `toolsets`              | \`Sequence\[AbstractToolset[DispatchDepsT]\]        | None\`                                                                      | Optional additional toolsets for this run.                                                                                                                                                        |
 | `builtin_tools`         | \`Sequence[AbstractBuiltinTool]                     | None\`                                                                      | Optional additional builtin tools to use for this run.                                                                                                                                            |
 | `on_complete`           | \`OnCompleteFunc[EventT]                            | None\`                                                                      | Optional callback function called when the agent run completes successfully. The callback receives the completed AgentRunResult and can optionally yield additional protocol-specific events.     |
+| `**kwargs`              | `Any`                                               | Additional keyword arguments forwarded to from_request.                     | `{}`                                                                                                                                                                                              |
 
 Returns:
 
@@ -962,7 +1001,7 @@ async def dispatch_request(
     message_history: Sequence[ModelMessage] | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     model: Model | KnownModelName | str | None = None,
-    instructions: Instructions[DispatchDepsT] = None,
+    instructions: _instructions.AgentInstructions[DispatchDepsT] = None,
     deps: DispatchDepsT = None,
     output_type: OutputSpec[Any] | None = None,
     model_settings: ModelSettings | None = None,
@@ -973,8 +1012,12 @@ async def dispatch_request(
     toolsets: Sequence[AbstractToolset[DispatchDepsT]] | None = None,
     builtin_tools: Sequence[AbstractBuiltinTool] | None = None,
     on_complete: OnCompleteFunc[EventT] | None = None,
+    **kwargs: Any,
 ) -> Response:
     """Handle a protocol-specific HTTP request by running the agent and returning a streaming response of protocol-specific events.
+
+    Extra keyword arguments are forwarded to [`from_request`][pydantic_ai.ui.UIAdapter.from_request],
+    allowing subclasses to accept additional adapter-specific parameters.
 
     Args:
         request: The incoming Starlette/FastAPI request.
@@ -996,6 +1039,7 @@ async def dispatch_request(
         builtin_tools: Optional additional builtin tools to use for this run.
         on_complete: Optional callback function called when the agent run completes successfully.
             The callback receives the completed [`AgentRunResult`][pydantic_ai.agent.AgentRunResult] and can optionally yield additional protocol-specific events.
+        **kwargs: Additional keyword arguments forwarded to [`from_request`][pydantic_ai.ui.UIAdapter.from_request].
 
     Returns:
         A streaming Starlette response with protocol-specific events encoded per the request's `Accept` header value.
@@ -1012,7 +1056,7 @@ async def dispatch_request(
         # The DepsT and OutputDataT come from `agent`, not from `cls`; the cast is necessary to explain this to pyright
         adapter = cast(
             UIAdapter[RunInputT, MessageT, EventT, DispatchDepsT, DispatchOutputDataT],
-            await cls.from_request(request, agent=cast(AbstractAgent[AgentDepsT, OutputDataT], agent)),
+            await cls.from_request(request, agent=cast(AbstractAgent[AgentDepsT, OutputDataT], agent), **kwargs),
         )
     except ValidationError as e:  # pragma: no cover
         return Response(

@@ -1,6 +1,6 @@
 # Third-Party Tools
 
-Pydantic AI supports integration with various third-party tool libraries, allowing you to leverage existing tool ecosystems in your agents.
+Pydantic AI supports integration with various third-party tool libraries, allowing you to leverage existing tool ecosystems in your agents. Third-party tools are also available as [capabilities](https://ai.pydantic.dev/capabilities/#third-party-capabilities) — see [Extensibility](https://ai.pydantic.dev/extensibility/index.md) for the full ecosystem.
 
 ## MCP Tools
 
@@ -26,7 +26,7 @@ search = DuckDuckGoSearchRun()
 search_tool = tool_from_langchain(search)
 
 agent = Agent(
-    'gateway/gemini:gemini-2.5-flash',
+    'gateway/gemini:gemini-3-flash-preview',
     tools=[search_tool],
 )
 
@@ -47,7 +47,7 @@ search = DuckDuckGoSearchRun()
 search_tool = tool_from_langchain(search)
 
 agent = Agent(
-    'google-gla:gemini-2.5-flash',
+    'google-gla:gemini-3-flash-preview',
     tools=[search_tool],
 )
 
@@ -71,7 +71,7 @@ from pydantic_ai.ext.langchain import LangChainToolset
 toolkit = SlackToolkit()
 toolset = LangChainToolset(toolkit.get_tools())
 
-agent = Agent('gateway/openai:gpt-5', toolsets=[toolset])
+agent = Agent('gateway/openai:gpt-5.2', toolsets=[toolset])
 # ...
 ```
 
@@ -84,7 +84,7 @@ from pydantic_ai.ext.langchain import LangChainToolset
 toolkit = SlackToolkit()
 toolset = LangChainToolset(toolkit.get_tools())
 
-agent = Agent('openai:gpt-5', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 # ...
 ```
 
@@ -110,7 +110,7 @@ tavily_search = tool_from_aci(
 )
 
 agent = Agent(
-    'gateway/gemini:gemini-2.5-flash',
+    'gateway/gemini:gemini-3-flash-preview',
     tools=[tavily_search],
 )
 
@@ -133,7 +133,7 @@ tavily_search = tool_from_aci(
 )
 
 agent = Agent(
-    'google-gla:gemini-2.5-flash',
+    'google-gla:gemini-3-flash-preview',
     tools=[tavily_search],
 )
 
@@ -162,7 +162,7 @@ toolset = ACIToolset(
     linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),
 )
 
-agent = Agent('gateway/openai:gpt-5', toolsets=[toolset])
+agent = Agent('gateway/openai:gpt-5.2', toolsets=[toolset])
 ```
 
 ```python
@@ -179,7 +179,7 @@ toolset = ACIToolset(
     linked_account_owner_id=os.getenv('LINKED_ACCOUNT_OWNER_ID'),
 )
 
-agent = Agent('openai:gpt-5', toolsets=[toolset])
+agent = Agent('openai:gpt-5.2', toolsets=[toolset])
 ```
 
 ## See Also
