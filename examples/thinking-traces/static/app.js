@@ -313,40 +313,14 @@ function appendUserBubble(text) {
 function createAssistantTurn() {
     const wrap = document.createElement('div');
     wrap.className = 'chat-turn chat-turn-assistant';
-    wrap.innerHTML = `
-    <details class="chat-traces">
-      <summary class="chat-traces-summary">
-        <span class="chat-traces-chevron" aria-hidden="true">▸</span>
-        <span>Trace</span>
-        <span class="chat-traces-count" data-trace-count>0 steps</span>
-      </summary>
-      <div class="timeline chat-traces-timeline"></div>
-    </details>
-    <div class="chat-answer">
-      <div class="chat-answer-label">Assistant</div>
-      <div class="chat-answer-body streaming"></div>
-    </div>`;
+    wrap.innerHTML = `<div class="turn-blocks"></div>`;
     traceFeed.appendChild(wrap);
-    const details_el = wrap.querySelector('.chat-traces');
-    details_el.open = false;
-    details_el.addEventListener('toggle', () => {
-        const ch = wrap.querySelector('.chat-traces-chevron');
-        if (ch) ch.textContent = details_el.open ? '▾' : '▸';
-    });
     return {
         wrap,
-        timeline: wrap.querySelector('.chat-traces-timeline'),
-        answerEl: wrap.querySelector('.chat-answer-body'),
-        countEl: wrap.querySelector('[data-trace-count]'),
+        blocks: wrap.querySelector('.turn-blocks'),
         thinkingCards: {},
-        answerRaw: '',
-        traceCount: 0,
+        activeTextBlock: null,
     };
-}
-
-function bumpTraceCount(ctx) {
-    ctx.traceCount += 1;
-    if (ctx.countEl) ctx.countEl.textContent = `${ctx.traceCount} steps`;
 }
 
 /** WebSocket JSON may send null deltas; JS (x + null) becomes the string "null". */
@@ -355,18 +329,26 @@ function wsStringChunk(value) {
     return typeof value === 'string' ? value : String(value);
 }
 
-function finalizeAssistantAnswer(ctx) {
-    if (!ctx || !ctx.answerEl) return;
-    let raw = wsStringChunk(ctx.answerRaw);
-    if (typeof marked !== 'undefined' && raw) {
-        ctx.answerEl.classList.remove('streaming');
-        ctx.answerEl.classList.add('tc-md');
-        ctx.answerEl.innerHTML = marked.parse(raw);
-    } else if (raw) {
-        ctx.answerEl.textContent = raw;
-    } else {
-        ctx.answerEl.classList.remove('streaming');
-        ctx.answerEl.textContent = '—';
+function createAnswerBlock() {
+    const el = document.createElement('div');
+    el.className = 'chat-answer';
+    el.innerHTML = `<div class="chat-answer-body streaming"></div>`;
+    return { el, bodyEl: el.querySelector('.chat-answer-body'), raw: '' };
+}
+
+function appendAnswerBlock(block, text) {
+    block.raw += text;
+    block.bodyEl.textContent = block.raw;
+}
+
+function sealAnswerBlock(block) {
+    if (!block) return;
+    block.bodyEl.classList.remove('streaming');
+    if (block.raw && typeof marked !== 'undefined') {
+        block.bodyEl.classList.add('tc-md');
+        block.bodyEl.innerHTML = marked.parse(block.raw);
+    } else if (!block.raw) {
+        block.el.remove();
     }
 }
 
@@ -377,7 +359,7 @@ function ensureWebSocket() {
     ws.onmessage = handleWsMessage;
     ws.onerror = () => {
         if (!active_turn_ctx) return;
-        active_turn_ctx.timeline.appendChild(createErrorCard('WebSocket error — is the server running?'));
+        active_turn_ctx.blocks.appendChild(createErrorCard('WebSocket error — is the server running?'));
         scrollFeed();
         setStatus('error', 'Error');
         conversation_active = false;
@@ -399,16 +381,17 @@ function handleWsMessage(ev) {
     if (msg.type === 'session_reset') return;
 
     const ctx = active_turn_ctx;
-    const timeline = ctx ? ctx.timeline : null;
+    const blocks = ctx ? ctx.blocks : null;
 
     switch (msg.type) {
         case 'thinking_start':
             if (!ctx) break;
+            sealAnswerBlock(ctx.activeTextBlock);
+            ctx.activeTextBlock = null;
             if (!ctx.thinkingCards[msg.part_index]) {
                 const tc = createThinkingCard();
                 ctx.thinkingCards[msg.part_index] = tc;
-                timeline.appendChild(tc);
-                bumpTraceCount(ctx);
+                blocks.appendChild(tc);
             }
             scrollFeed();
             break;
@@ -418,8 +401,7 @@ function handleWsMessage(ev) {
             if (!ctx.thinkingCards[msg.part_index]) {
                 const tc = createThinkingCard();
                 ctx.thinkingCards[msg.part_index] = tc;
-                timeline.appendChild(tc);
-                bumpTraceCount(ctx);
+                blocks.appendChild(tc);
             }
             appendThinking(ctx.thinkingCards[msg.part_index], msg.content);
             scrollFeed();
@@ -437,15 +419,17 @@ function handleWsMessage(ev) {
             if (!ctx) break;
             sealAllThinking(ctx.thinkingCards);
             ctx.thinkingCards = {};
-            timeline.appendChild(createToolCallCard(msg));
-            bumpTraceCount(ctx);
+            sealAnswerBlock(ctx.activeTextBlock);
+            ctx.activeTextBlock = null;
+            blocks.appendChild(createToolCallCard(msg));
             scrollFeed();
             break;
 
         case 'tool_result':
             if (!ctx) break;
-            timeline.appendChild(createToolResultCard(msg));
-            bumpTraceCount(ctx);
+            sealAnswerBlock(ctx.activeTextBlock);
+            ctx.activeTextBlock = null;
+            blocks.appendChild(createToolResultCard(msg));
             scrollFeed();
             break;
 
@@ -455,15 +439,24 @@ function handleWsMessage(ev) {
             ctx.thinkingCards = {};
             {
                 const piece = wsStringChunk(msg.content);
-                ctx.answerRaw = (ctx.answerRaw || '') + piece;
-                ctx.answerEl.textContent = ctx.answerRaw;
+                if (!ctx.activeTextBlock) {
+                    ctx.activeTextBlock = createAnswerBlock();
+                    blocks.appendChild(ctx.activeTextBlock.el);
+                }
+                appendAnswerBlock(ctx.activeTextBlock, piece);
                 addTokens(piece.length / 4);
             }
             scrollFeed();
             break;
 
         case 'error':
-            if (ctx && timeline) timeline.appendChild(createErrorCard(wsStringChunk(msg.content)));
+            if (ctx) {
+                sealAllThinking(ctx.thinkingCards);
+                ctx.thinkingCards = {};
+                sealAnswerBlock(ctx.activeTextBlock);
+                ctx.activeTextBlock = null;
+            }
+            if (ctx && blocks) blocks.appendChild(createErrorCard(wsStringChunk(msg.content)));
             scrollFeed();
             setStatus('error', 'Error');
             conversation_active = false;
@@ -475,7 +468,8 @@ function handleWsMessage(ev) {
             if (ctx) {
                 sealAllThinking(ctx.thinkingCards);
                 ctx.thinkingCards = {};
-                finalizeAssistantAnswer(ctx);
+                sealAnswerBlock(ctx.activeTextBlock);
+                ctx.activeTextBlock = null;
                 active_turn_ctx = null;
             }
             setStatus('done', 'Done');
@@ -507,8 +501,8 @@ function sendChatMessage() {
         try {
             ws.send(JSON.stringify(payload));
         } catch {
-            if (active_turn_ctx && active_turn_ctx.timeline) {
-                active_turn_ctx.timeline.appendChild(createErrorCard('Could not send message.'));
+            if (active_turn_ctx && active_turn_ctx.blocks) {
+                active_turn_ctx.blocks.appendChild(createErrorCard('Could not send message.'));
             }
             conversation_active = false;
             setStatus('error', 'Error');
@@ -620,63 +614,6 @@ function sealThinking(card) {
 function sealAllThinking(cardsMap) {
     if (!cardsMap) return;
     Object.values(cardsMap).forEach(sealThinking);
-}
-
-// ── Streaming text card ────────────────────────────────────────────────────
-function createTextCard() {
-    eventIndex++;
-    const card = document.createElement('div');
-    card.className = 'tc tc-text';
-    card.dataset.expanded = 'true';
-    card.innerHTML = `
-    <div class="tc-line"></div>
-    <div class="tc-dot tc-dot-text">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-      </svg>
-    </div>
-    <div class="tc-body">
-      <div class="tc-header" role="button" tabindex="0">
-        <div class="tc-header-left">
-          <span class="tc-badge tc-badge-text">Response</span>
-          <span class="tc-time">${nowStr()}</span>
-        </div>
-        <div class="tc-header-right">
-          <span class="tc-stats" id="text-stats-${eventIndex}">Streaming…</span>
-          <svg class="tc-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </div>
-      </div>
-      <div class="tc-content">
-        <div class="tc-text-body" id="text-body-${eventIndex}"></div>
-        <span class="streaming-cursor"></span>
-      </div>
-    </div>`;
-
-    card._raw = '';
-    card._bodyEl = card.querySelector(`#text-body-${eventIndex}`);
-    card._statsEl = card.querySelector(`#text-stats-${eventIndex}`);
-    card._cursorEl = card.querySelector('.streaming-cursor');
-
-    setupCollapse(card);
-    return card;
-}
-
-function appendText(card, delta) {
-    card._raw += delta;
-    card._bodyEl.textContent = card._raw;
-    const words = card._raw.split(/\s+/).filter(Boolean).length;
-    card._statsEl.textContent = `${words} words`;
-}
-
-function sealText(card) {
-    if (!card) return;
-    card._cursorEl?.remove();
-    if (card._raw && typeof marked !== 'undefined') {
-        card._bodyEl.className = 'tc-text-body tc-md';
-        card._bodyEl.innerHTML = marked.parse(card._raw);
-    }
-    const words = card._raw.split(/\s+/).filter(Boolean).length;
-    card._statsEl.textContent = `${words} words`;
 }
 
 // ── Tool Call card ─────────────────────────────────────────────────────────
